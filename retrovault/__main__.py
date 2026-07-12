@@ -24,9 +24,14 @@ def main(argv=None):
             print(f"{result['system']}: {result['status']} - {result['message']}")
         sys.exit(0 if all(r["status"] == "ok" for r in results) else 1)
 
-    from .ui_tk import RetroVault
-    app = RetroVault()
-    app.mainloop()
+    if argv and argv[0] == "--legacy-ui":
+        from .ui_tk import RetroVault
+        app = RetroVault()
+        app.mainloop()
+        return
+
+    from .ui.app import main as run_gui
+    run_gui()
 
 
 if __name__ == "__main__":
