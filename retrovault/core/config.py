@@ -3,147 +3,25 @@
 import copy
 import json
 import logging
+from importlib import resources
 
 from .launch import _strip_wrapping_quotes, get_emulator_config
 from .paths import CONFIG_FILE
 
 
+def _load_json_data(filename):
+    with resources.files("retrovault.data").joinpath(filename).open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 # ── Default system definitions (modular — add more here) ──────────────────────
-DEFAULT_SYSTEMS = {
-    "nes": {
-        "name": "Nintendo NES",
-        "short": "NES",
-        "extensions": [".nes"],
-        "emulator_key": "nes",
-        "color": "#e74c3c",
-        "icon": "🎮",
-    },
-    "snes": {
-        "name": "Super Nintendo",
-        "short": "SNES",
-        "extensions": [".sfc", ".smc"],
-        "emulator_key": "snes",
-        "color": "#8e44ad",
-        "icon": "🕹️",
-    },
-    "gb": {
-        "name": "Game Boy",
-        "short": "GB",
-        "extensions": [".gb"],
-        "emulator_key": "gb",
-        "color": "#27ae60",
-        "icon": "📱",
-    },
-    "gba": {
-        "name": "Game Boy Advance",
-        "short": "GBA",
-        "extensions": [".gba"],
-        "emulator_key": "gba",
-        "color": "#2980b9",
-        "icon": "🎯",
-    },
-    "n64": {
-        "name": "Nintendo 64",
-        "short": "N64",
-        "extensions": [".z64", ".n64", ".v64"],
-        "emulator_key": "n64",
-        "color": "#e67e22",
-        "icon": "🏆",
-    },
-    "psx": {
-        "name": "PlayStation 1",
-        "short": "PSX",
-        "extensions": [".bin", ".cue", ".iso", ".img"],
-        "emulator_key": "psx",
-        "color": "#2c3e50",
-        "icon": "💿",
-    },
-    "genesis": {
-        "name": "Sega Genesis",
-        "short": "GEN",
-        "extensions": [".md", ".bin", ".gen", ".smd"],
-        "emulator_key": "genesis",
-        "color": "#16a085",
-        "icon": "⚡",
-    },
-    "gbc": {
-        "name": "Game Boy Color",
-        "short": "GBC",
-        "extensions": [".gbc"],
-        "emulator_key": "gbc",
-        "color": "#f39c12",
-        "icon": "🌈",
-    },
-}
+# Shipped as read-only package data; see retrovault/data/*.json.
+DEFAULT_SYSTEMS = _load_json_data("systems.json")
 
-EMULATOR_PRESETS = {
-    "custom": {"name": "Custom", "args": "{rom}"},
-    "project64": {"name": "Project64", "args": '"{rom}"'},
-    "retroarch": {"name": "RetroArch", "args": "-L {core} {rom}"},
-    "mgba": {"name": "mGBA", "args": '"{rom}"'},
-    "duckstation": {"name": "DuckStation", "args": '"{rom}"'},
-    "snes9x": {"name": "Snes9x", "args": '"{rom}"'},
-    "fceux": {"name": "FCEUX", "args": '"{rom}"'},
-}
+EMULATOR_PRESETS = _load_json_data("profiles.json")
 
-RECOMMENDED_EMULATORS = {
-    "nes": {
-        "name": "MesenCE",
-        "profile": "custom",
-        "args": '"{rom}"',
-        "url": "https://github.com/nesdev-org/MesenCE/releases",
-        "notes": "Best all-around standalone pick for NES.",
-    },
-    "snes": {
-        "name": "MesenCE",
-        "profile": "custom",
-        "args": '"{rom}"',
-        "url": "https://github.com/nesdev-org/MesenCE/releases",
-        "notes": "Shared with NES for a simple all-in-one setup.",
-    },
-    "gb": {
-        "name": "mGBA",
-        "profile": "mgba",
-        "args": '"{rom}"',
-        "url": "https://mgba.io/downloads.html",
-        "notes": "Recommended for GB, GBC, and GBA.",
-    },
-    "gbc": {
-        "name": "mGBA",
-        "profile": "mgba",
-        "args": '"{rom}"',
-        "url": "https://mgba.io/downloads.html",
-        "notes": "Recommended for GB, GBC, and GBA.",
-    },
-    "gba": {
-        "name": "mGBA",
-        "profile": "mgba",
-        "args": '"{rom}"',
-        "url": "https://mgba.io/downloads.html",
-        "notes": "Recommended for GB, GBC, and GBA.",
-    },
-    "n64": {
-        "name": "Rosalie's Mupen GUI",
-        "profile": "custom",
-        "args": '"{rom}"',
-        "url": "https://github.com/Rosalie241/RMG/releases",
-        "notes": "Default N64 recommendation. Project64 remains the familiar Windows alternate.",
-    },
-    "psx": {
-        "name": "DuckStation",
-        "profile": "duckstation",
-        "args": '"{rom}"',
-        "url": "https://github.com/stenzek/duckstation/releases/tag/latest",
-        "notes": "Requires a BIOS from the user's own console.",
-    },
-    "genesis": {
-        "name": "ares",
-        "profile": "custom",
-        "args": '"{rom}"',
-        "url": "https://ares-emu.net/download",
-        "notes": "Current Genesis default for Easy Mode.",
-    },
-}
+# Platform-keyed recommended-emulator picks (windows-x86_64, linux-x86_64, linux-aarch64).
+RECOMMENDED_EMULATORS = _load_json_data("recommendations.json")
 
 SETUP_MODES = {
     "easy": {"name": "Easy Mode", "description": "Recommended standalone emulators with guided setup."},
@@ -225,13 +103,23 @@ def save_config(cfg):
         json.dump(cfg, f, indent=2)
 
 
-def get_recommended_emulator(system_key):
-    return copy.deepcopy(RECOMMENDED_EMULATORS.get(system_key, {}))
+def get_recommended_emulator(system_key, platform_key=None):
+    if platform_key is None:
+        platform_key = "windows-x86_64"
+
+    for candidate in (platform_key, "linux-x86_64", "windows-x86_64"):
+        table = RECOMMENDED_EMULATORS.get(candidate)
+        if not table:
+            continue
+        recommendation = table.get(system_key)
+        if recommendation:
+            return copy.deepcopy(recommendation)
+    return {}
 
 
-def apply_recommended_emulator(config, system_key, path=None):
+def apply_recommended_emulator(config, system_key, path=None, platform_key=None):
     updated = copy.deepcopy(config)
-    recommendation = get_recommended_emulator(system_key)
+    recommendation = get_recommended_emulator(system_key, platform_key)
     if not recommendation:
         return updated
 
