@@ -30,6 +30,7 @@ retrovault = ["data/*.json", "data/emulators/*.json", "ui/*.qss"]
 [tool.ruff]
 target-version = "py310"
 line-length = 120
+extend-exclude = [".claude"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
