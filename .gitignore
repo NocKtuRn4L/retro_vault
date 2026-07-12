@@ -9,6 +9,7 @@ venv/
 
 # Tooling
 .claude/settings.local.json
+.claude/worktrees/
 .agents/
 
 # OS
