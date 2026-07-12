@@ -1,0 +1,34 @@
+{
+  "id": "duckstation",
+  "name": "DuckStation",
+  "website": "https://www.duckstation.org",
+  "license": "GPL-3.0-only",
+  "profiles": [{"systems": ["psx"], "args": "\"{rom}\""}],
+  "detect": {
+    "binaries": ["duckstation-qt", "duckstation"],
+    "windows_paths": ["%LOCALAPPDATA%\\DuckStation\\duckstation-qt-x64-ReleaseLTCG.exe"]
+  },
+  "install": {
+    "windows-x86_64": {
+      "strategy": "download",
+      "url": "https://github.com/stenzek/duckstation/releases/download/v0.1-11108/duckstation-windows-x64-release.zip",
+      "sha256": "df81b47a8c03cb527744f974b7d2199c91dca1f3dd837d3bd2cfd57781633fbd",
+      "archive": "zip",
+      "exe": "duckstation-qt-x64-ReleaseLTCG.exe"
+    },
+    "linux-x86_64": {
+      "strategy": "download",
+      "url": "https://github.com/stenzek/duckstation/releases/download/v0.1-11108/DuckStation-x64.AppImage",
+      "sha256": "cf634b2e245c53b0a16dde3be00b96495b435c810d15e1f422266a4c1d65d72a",
+      "archive": "appimage",
+      "exe": "DuckStation-x64.AppImage"
+    },
+    "linux-aarch64": {
+      "strategy": "download",
+      "url": "https://github.com/stenzek/duckstation/releases/download/v0.1-11108/DuckStation-arm64.AppImage",
+      "sha256": "ace8bd7f9d224e2316a399062e0aab6d17fd97a0c32d2b4567daaabe50a880f2",
+      "archive": "appimage",
+      "exe": "DuckStation-arm64.AppImage"
+    }
+  }
+}

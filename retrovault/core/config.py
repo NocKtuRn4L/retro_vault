@@ -29,6 +29,7 @@ SETUP_MODES = {
 }
 
 DEFAULT_CONFIG = {
+    "remote_catalog_url": "",
     "rom_dirs": [],
     "emulators": {
         "nes":     {"path": "", "args": "{rom}", "profile": "custom", "launch_type": "exe", "flatpak_id": ""},

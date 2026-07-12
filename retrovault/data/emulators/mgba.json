@@ -1,0 +1,31 @@
+{
+  "id": "mgba",
+  "name": "mGBA",
+  "website": "https://mgba.io",
+  "license": "MPL-2.0",
+  "profiles": [{"systems": ["gb", "gbc", "gba"], "args": "\"{rom}\""}],
+  "detect": {
+    "binaries": ["mgba-qt", "mgba"],
+    "windows_paths": ["%LOCALAPPDATA%\\mGBA\\mgba.exe", "C:\\Program Files\\mGBA\\mgba.exe"],
+    "flatpak_id": "io.mgba.mGBA"
+  },
+  "install": {
+    "windows-x86_64": {
+      "strategy": "unavailable",
+      "reason": "No pinned Windows artifact and checksum are shipped; use the project download page or detection."
+    },
+    "linux-x86_64": {
+      "strategy": "download",
+      "url": "https://github.com/mgba-emu/mgba/releases/download/0.10.5/mGBA-0.10.5-appimage-x64.appimage",
+      "sha256": "fdf0a5c1588e1606c38315735cf48a9f9dca3573f32a3947ebc956f8297e85cd",
+      "archive": "appimage",
+      "exe": "mGBA-0.10.5-appimage-x64.appimage",
+      "fallback": {"strategy": "flatpak", "flatpak_id": "io.mgba.mGBA"}
+    },
+    "linux-aarch64": {
+      "strategy": "apt",
+      "package": "mgba-qt",
+      "fallback": {"strategy": "flatpak", "flatpak_id": "io.mgba.mGBA"}
+    }
+  }
+}

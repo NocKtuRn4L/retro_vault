@@ -1,0 +1,30 @@
+{
+  "id": "rmg",
+  "name": "Rosalie's Mupen GUI",
+  "website": "https://github.com/Rosalie241/RMG",
+  "license": "GPL-3.0-or-later",
+  "profiles": [{"systems": ["n64"], "args": "\"{rom}\""}],
+  "detect": {
+    "binaries": ["RMG", "rmg"],
+    "windows_paths": ["%LOCALAPPDATA%\\RMG\\RMG.exe", "C:\\Program Files\\RMG\\RMG.exe"],
+    "flatpak_id": "com.github.Rosalie241.RMG"
+  },
+  "install": {
+    "windows-x86_64": {
+      "strategy": "download",
+      "url": "https://github.com/Rosalie241/RMG/releases/download/v0.9.0/RMG-Portable-Windows64-v0.9.0.zip",
+      "sha256": "f81640a0ae7474c0915f263d1acac20cf816ac8666f897cbf3710cd485a9027d",
+      "archive": "zip",
+      "exe": "RMG.exe"
+    },
+    "linux-x86_64": {
+      "strategy": "download",
+      "url": "https://github.com/Rosalie241/RMG/releases/download/v0.9.0/RMG-Portable-Linux64-v0.9.0.AppImage",
+      "sha256": "43ce15e11404aaff313ec44ca03601e5e753bba3b355c38a7c67a4344d517aca",
+      "archive": "appimage",
+      "exe": "RMG-Portable-Linux64-v0.9.0.AppImage",
+      "fallback": {"strategy": "flatpak", "flatpak_id": "com.github.Rosalie241.RMG"}
+    },
+    "linux-aarch64": {"strategy": "flatpak", "flatpak_id": "com.github.Rosalie241.RMG"}
+  }
+}

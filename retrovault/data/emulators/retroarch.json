@@ -1,0 +1,33 @@
+{
+  "id": "retroarch",
+  "name": "RetroArch",
+  "website": "https://www.retroarch.com",
+  "license": "GPL-3.0-or-later",
+  "profiles": [{
+    "systems": ["nes", "snes", "gb", "gbc", "gba", "n64", "psx", "genesis"],
+    "args": "-L {core} {rom}"
+  }],
+  "cores": {
+    "nes": "nestopia_libretro",
+    "snes": "snes9x_libretro",
+    "gb": "gambatte_libretro",
+    "gbc": "gambatte_libretro",
+    "gba": "mgba_libretro",
+    "n64": "mupen64plus_next_libretro",
+    "psx": "mednafen_psx_hw_libretro",
+    "genesis": "genesis_plus_gx_libretro"
+  },
+  "detect": {
+    "binaries": ["retroarch"],
+    "windows_paths": ["C:\\RetroArch-Win64\\retroarch.exe", "%PROGRAMFILES%\\RetroArch-Win64\\retroarch.exe"],
+    "flatpak_id": "org.libretro.RetroArch"
+  },
+  "install": {
+    "windows-x86_64": {
+      "strategy": "unavailable",
+      "reason": "No pinned Windows artifact and checksum are shipped; use the project download page or detection."
+    },
+    "linux-x86_64": {"strategy": "flatpak", "flatpak_id": "org.libretro.RetroArch"},
+    "linux-aarch64": {"strategy": "flatpak", "flatpak_id": "org.libretro.RetroArch"}
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "id": "ares",
+  "name": "ares",
+  "website": "https://ares-emu.net",
+  "license": "ISC",
+  "profiles": [{"systems": ["genesis", "snes"], "args": "\"{rom}\""}],
+  "detect": {
+    "binaries": ["ares"],
+    "windows_paths": ["%LOCALAPPDATA%\\ares\\ares.exe", "C:\\Program Files\\ares\\ares.exe"]
+  },
+  "install": {
+    "windows-x86_64": {
+      "strategy": "download",
+      "url": "https://github.com/ares-emulator/ares/releases/download/v148/ares-windows-x64.zip",
+      "sha256": "fa97958e1d359e3fe254353f87b6508f2762a959d7eb264c69965ad002037298",
+      "archive": "zip",
+      "exe": "ares.exe"
+    },
+    "linux-x86_64": {"strategy": "unavailable", "reason": "No supported prebuilt Linux install is modeled."},
+    "linux-aarch64": {"strategy": "unavailable", "reason": "No supported prebuilt ARM64 install is modeled."}
+  }
+}

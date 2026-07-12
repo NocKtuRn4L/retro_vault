@@ -1,0 +1,34 @@
+{
+  "id": "mesen-ce",
+  "name": "MesenCE",
+  "website": "https://github.com/nesdev-org/MesenCE",
+  "license": "GPL-3.0-or-later",
+  "profiles": [{"systems": ["nes", "snes"], "args": "\"{rom}\""}],
+  "detect": {
+    "binaries": ["Mesen", "mesen"],
+    "windows_paths": ["%LOCALAPPDATA%\\Mesen\\Mesen.exe"]
+  },
+  "install": {
+    "windows-x86_64": {
+      "strategy": "download",
+      "url": "https://github.com/nesdev-org/MesenCE/releases/download/2.2.1/Mesen_2.2.1_Windows.zip",
+      "sha256": "c19e10b3b3865eb0e86e4d01bf09a5027a4452081c04b5bd5b6cbbf76e346fd6",
+      "archive": "zip",
+      "exe": "Mesen.exe"
+    },
+    "linux-x86_64": {
+      "strategy": "download",
+      "url": "https://github.com/nesdev-org/MesenCE/releases/download/2.2.1/Mesen_2.2.1_Linux_x64.zip",
+      "sha256": "c88ff4d251b407515c43d3332d641927655cd69fb538996b6a21da4509dbb58f",
+      "archive": "zip",
+      "exe": "Mesen"
+    },
+    "linux-aarch64": {
+      "strategy": "download",
+      "url": "https://github.com/nesdev-org/MesenCE/releases/download/2.2.1/Mesen_2.2.1_Linux_ARM64.zip",
+      "sha256": "5030702ba13d043bf926ee3cc6c6a5d3567e08345e9c50b2df4d4d08b90ead30",
+      "archive": "zip",
+      "exe": "Mesen"
+    }
+  }
+}
