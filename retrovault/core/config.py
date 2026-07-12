@@ -136,4 +136,6 @@ def apply_recommended_emulator(config, system_key, path=None, platform_key=None)
 
 def is_emulator_configured(config, system_key):
     emu = get_emulator_config(system_key, config)
+    if emu.get("launch_type") == "flatpak":
+        return bool(emu.get("flatpak_id", "").strip())
     return bool(_strip_wrapping_quotes(emu.get("path", "")))

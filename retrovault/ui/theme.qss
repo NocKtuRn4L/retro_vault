@@ -1,5 +1,5 @@
 /* RetroVault retro-CRT theme for the PySide6 UI.
- * Palette translated 1:1 from retrovault/ui_tk.py COLORS.
+ * RetroVault CRT palette.
  *   bg #0d0d0d  panel #141414  card #1a1a1a  border #2a2a2a
  *   accent #ff3c3c  accent2 #ff8c00  text #f0f0f0  subtext #888888
  *   hover #252525  selected #1f1f1f  success #00c853  warning #ffd600

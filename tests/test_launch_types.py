@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from retrovault.core import launch
-from retrovault.core.config import DEFAULT_CONFIG, migrate_config
+from retrovault.core.config import DEFAULT_CONFIG, is_emulator_configured, migrate_config
 
 
 class FlatpakLaunchTests(unittest.TestCase):
@@ -138,6 +138,14 @@ class BinaryLaunchTests(unittest.TestCase):
 
 
 class MigrateConfigLaunchTypeTests(unittest.TestCase):
+    def test_flatpak_configuration_is_recognized_without_exe_path(self):
+        configured = migrate_config({})
+        configured["emulators"]["n64"].update(
+            {"launch_type": "flatpak", "path": "", "flatpak_id": "com.github.Rosalie241.RMG"}
+        )
+
+        self.assertTrue(is_emulator_configured(configured, "n64"))
+
     def test_migrate_config_adds_exe_defaults(self):
         migrated = migrate_config({})
 
