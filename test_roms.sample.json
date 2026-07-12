@@ -1,0 +1,42 @@
+{
+  "nes": {
+    "path": "C:/path/to/legal-tests/nes/test-rom.nes",
+    "label": "NES smoke ROM",
+    "notes": "Use a legal homebrew or test ROM."
+  },
+  "snes": {
+    "path": "C:/path/to/legal-tests/snes/test-rom.sfc",
+    "label": "SNES smoke ROM",
+    "notes": "Use a legal homebrew or test ROM."
+  },
+  "gb": {
+    "path": "C:/path/to/legal-tests/gb/test-rom.gb",
+    "label": "Game Boy smoke ROM",
+    "notes": "Use a legal homebrew or test ROM."
+  },
+  "gbc": {
+    "path": "C:/path/to/legal-tests/gbc/test-rom.gbc",
+    "label": "Game Boy Color smoke ROM",
+    "notes": "Use a legal homebrew or test ROM."
+  },
+  "gba": {
+    "path": "C:/path/to/legal-tests/gba/test-rom.gba",
+    "label": "Game Boy Advance smoke ROM",
+    "notes": "Use a legal homebrew or test ROM."
+  },
+  "n64": {
+    "path": "C:/path/to/legal-tests/n64/test-rom.z64",
+    "label": "Nintendo 64 smoke ROM",
+    "notes": "Use a legal homebrew ROM."
+  },
+  "psx": {
+    "path": "C:/path/to/legal-tests/psx/test-image.cue",
+    "label": "PlayStation smoke image",
+    "notes": "Use a legal homebrew image and a BIOS you own if required."
+  },
+  "genesis": {
+    "path": "C:/path/to/legal-tests/genesis/test-rom.md",
+    "label": "Genesis smoke ROM",
+    "notes": "Use a legal homebrew or test ROM."
+  }
+}

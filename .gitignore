@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling
+.claude/settings.local.json
+.agents/
+
+# OS
+Thumbs.db
+.DS_Store
