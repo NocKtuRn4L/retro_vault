@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 from .config import _deep_merge
-from .launch import build_launch_command
+from .launch import build_launch_command, get_emulator_config
 from .paths import TEST_ROM_FILE
 
 DEFAULT_TEST_ROM_MANIFEST = {
@@ -97,9 +97,14 @@ def audit_test_roms(config, manifest):
             })
             continue
 
+        status = "ok"
+        if not config.get("use_retroarch"):
+            launch_type = get_emulator_config(system_key, config).get("launch_type", "exe")
+            if launch_type != "exe":
+                status = f"ok [{launch_type}]"
         results.append({
             "system": system_key,
-            "status": "ok",
+            "status": status,
             "message": subprocess.list2cmdline(cmd),
         })
     return results
