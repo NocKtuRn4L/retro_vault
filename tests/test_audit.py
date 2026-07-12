@@ -29,6 +29,32 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(results[0]["system"], "n64")
         self.assertEqual(results[0]["status"], "missing_rom")
 
+    def test_audit_flatpak_setup_keeps_ok_status_with_tagged_message(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rom_path = Path(tmp) / "game.z64"
+            rom_path.write_bytes(b"rom")
+            self.config["emulators"]["n64"] = {
+                "path": "",
+                "args": '"{rom}"',
+                "profile": "custom",
+                "launch_type": "flatpak",
+                "flatpak_id": "com.github.Rosalie241.RMG",
+            }
+            manifest = {"n64": {"path": str(rom_path)}}
+
+            with mock.patch("retrovault.core.launch.shutil.which", return_value="/usr/bin/flatpak"), \
+                 mock.patch("retrovault.core.launch.subprocess.run") as run:
+                run.return_value.returncode = 0
+                from retrovault.core.launch import _reset_flatpak_cache
+                _reset_flatpak_cache()
+                results = audit.audit_test_roms(self.config, manifest)
+
+        # status must stay exactly "ok" — CLI exit codes key off it
+        self.assertEqual(results[0]["status"], "ok")
+        self.assertTrue(results[0]["message"].startswith("[flatpak]"))
+
     def test_audit_test_roms_reports_ok_for_valid_setup(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

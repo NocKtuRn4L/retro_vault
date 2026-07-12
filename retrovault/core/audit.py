@@ -97,14 +97,15 @@ def audit_test_roms(config, manifest):
             })
             continue
 
-        status = "ok"
+        message = subprocess.list2cmdline(cmd)
         if not config.get("use_retroarch"):
             launch_type = get_emulator_config(system_key, config).get("launch_type", "exe")
             if launch_type != "exe":
-                status = f"ok [{launch_type}]"
+                # Tag goes in the message: callers key off status == "ok" for exit codes.
+                message = f"[{launch_type}] {message}"
         results.append({
             "system": system_key,
-            "status": status,
-            "message": subprocess.list2cmdline(cmd),
+            "status": "ok",
+            "message": message,
         })
     return results
