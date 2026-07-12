@@ -7,20 +7,49 @@ No emulation is built in. RetroVault launches your installed emulators with your
 
 ## Requirements
 
-- **Python 3.7+**
-- **Tkinter** (usually bundled with Python; on Debian or Raspberry Pi install with `sudo apt install python3-tk`)
+- **Python 3.10+**
+- **PySide6-Essentials 6.6+**
+
+Raspberry Pi 5 requires Raspberry Pi OS Trixie (Debian 13) or newer so the
+official PySide6 aarch64 wheels have a compatible glibc.
+
+For local development, install the package with its dev tools:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m ruff check .
+python -m unittest discover tests -v
+```
 
 ---
 
 ## Running the App
 
 ```bash
-python3 launcher.py
-# or on Windows:
-python launcher.py
+pipx install retrovault
+retrovault
 ```
 
-Config and library files are saved to `~/.retrovault/`.
+From a source checkout, use `python -m retrovault` after installing the
+development requirements above.
+
+Existing installs continue using `~/.retrovault/`. Fresh Linux installs honor
+`XDG_CONFIG_HOME` when it is set.
+
+## Raspberry Pi 5
+
+Use Raspberry Pi OS Trixie (Debian 13) or newer, then install with:
+
+```bash
+sudo apt install pipx flatpak
+pipx install retrovault
+flatpak install flathub org.libretro.RetroArch
+retrovault --install-desktop-entry
+```
+
+RetroArch is the recommended backend on Linux aarch64. Configure controllers
+inside each emulator; RetroVault's own interface currently targets keyboard
+and mouse input.
 
 For emulator smoke testing, RetroVault also looks for a test ROM manifest at
 `~/.retrovault/test_roms.json`.
@@ -103,7 +132,7 @@ RetroVault now supports a simple audit pass for emulator wiring so we can catch 
 3. Run:
 
 ```bash
-python launcher.py --audit-test-roms
+retrovault --audit-test-roms
 ```
 
 The audit checks that:
@@ -119,7 +148,7 @@ Suggested practice:
 
 - Keep one small, known-good smoke ROM per supported system.
 - Re-run the audit after changing emulator defaults, launch args, or setup flows.
-- Add the audit command to CI later if you maintain a machine with those emulator binaries installed.
+- Add the audit command to CI if you maintain a machine with those emulator binaries installed.
 
 Do not use public commercial ROM archives as a packaged test source. For documentation and QA, we should stick to legal homebrew, test ROMs, and user-provided content.
 

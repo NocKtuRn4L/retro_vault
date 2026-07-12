@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=RetroVault
+Comment=ROM library frontend for external emulators
+Exec=retrovault
+Icon=retrovault
+Terminal=false
+Categories=Game;Emulator;

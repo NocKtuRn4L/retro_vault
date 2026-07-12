@@ -26,7 +26,7 @@ dev = ["ruff>=0.4"]
 include = ["retrovault*"]
 
 [tool.setuptools.package-data]
-retrovault = ["data/*.json", "data/emulators/*.json", "ui/*.qss"]
+retrovault = ["data/*.json", "data/*.desktop", "data/*.svg", "data/emulators/*.json", "ui/*.qss"]
 
 [tool.ruff]
 target-version = "py310"
