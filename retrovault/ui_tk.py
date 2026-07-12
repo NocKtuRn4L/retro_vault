@@ -11,7 +11,7 @@ import threading
 import tkinter as tk
 import webbrowser
 from pathlib import Path
-from tkinter import ttk, filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 from .core.config import (
     EMULATOR_PRESETS,
@@ -360,7 +360,7 @@ class RetroVault(tk.Tk):
         if ok:
             self.status_var.set(f"▶ Launched: {rom['name']}")
         else:
-            self.status_var.set(f"⚠ Launch failed")
+            self.status_var.set("⚠ Launch failed")
             messagebox.showerror("Launch Error", msg, parent=self)
 
     def _open_location(self, rom):
