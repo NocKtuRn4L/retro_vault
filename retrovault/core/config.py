@@ -31,14 +31,14 @@ SETUP_MODES = {
 DEFAULT_CONFIG = {
     "rom_dirs": [],
     "emulators": {
-        "nes":     {"path": "", "args": "{rom}", "profile": "custom"},
-        "snes":    {"path": "", "args": "{rom}", "profile": "custom"},
-        "gb":      {"path": "", "args": "{rom}", "profile": "custom"},
-        "gba":     {"path": "", "args": "{rom}", "profile": "custom"},
-        "n64":     {"path": "", "args": "{rom}", "profile": "custom"},
-        "psx":     {"path": "", "args": "{rom}", "profile": "custom"},
-        "genesis": {"path": "", "args": "{rom}", "profile": "custom"},
-        "gbc":     {"path": "", "args": "{rom}", "profile": "custom"},
+        "nes":     {"path": "", "args": "{rom}", "profile": "custom", "launch_type": "exe", "flatpak_id": ""},
+        "snes":    {"path": "", "args": "{rom}", "profile": "custom", "launch_type": "exe", "flatpak_id": ""},
+        "gb":      {"path": "", "args": "{rom}", "profile": "custom", "launch_type": "exe", "flatpak_id": ""},
+        "gba":     {"path": "", "args": "{rom}", "profile": "custom", "launch_type": "exe", "flatpak_id": ""},
+        "n64":     {"path": "", "args": "{rom}", "profile": "custom", "launch_type": "exe", "flatpak_id": ""},
+        "psx":     {"path": "", "args": "{rom}", "profile": "custom", "launch_type": "exe", "flatpak_id": ""},
+        "genesis": {"path": "", "args": "{rom}", "profile": "custom", "launch_type": "exe", "flatpak_id": ""},
+        "gbc":     {"path": "", "args": "{rom}", "profile": "custom", "launch_type": "exe", "flatpak_id": ""},
     },
     "emulator_profiles": EMULATOR_PRESETS,
     "setup": {
@@ -82,6 +82,8 @@ def migrate_config(cfg):
         cfg["emulators"].setdefault(sid, {"path": "", "args": "{rom}", "profile": "custom"})
         cfg["emulators"][sid].setdefault("args", "{rom}")
         cfg["emulators"][sid].setdefault("profile", "custom")
+        cfg["emulators"][sid].setdefault("launch_type", "exe")
+        cfg["emulators"][sid].setdefault("flatpak_id", "")
     cfg["emulator_profiles"] = _deep_merge(EMULATOR_PRESETS, cfg.get("emulator_profiles", {}))
     cfg["setup"] = _deep_merge(DEFAULT_CONFIG["setup"], cfg.get("setup", {}))
     return cfg

@@ -3,9 +3,18 @@
 import copy
 import logging
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# Cache of flatpak `flatpak info <id>` results, keyed by flatpak_id, so
+# validation doesn't re-shell out on every launch/audit pass.
+_flatpak_info_cache = {}
+
+
+def _reset_flatpak_cache():
+    _flatpak_info_cache.clear()
 
 
 def _strip_wrapping_quotes(value):
@@ -59,6 +68,29 @@ def get_emulator_config(system_key, config):
     return emu
 
 
+def _is_flatpak_installed(flatpak_id):
+    if flatpak_id in _flatpak_info_cache:
+        return _flatpak_info_cache[flatpak_id]
+    try:
+        result = subprocess.run(["flatpak", "info", flatpak_id], capture_output=True)
+        installed = result.returncode == 0
+    except OSError:
+        installed = False
+    _flatpak_info_cache[flatpak_id] = installed
+    return installed
+
+
+def _validate_flatpak_emulator(emu, system_key):
+    flatpak_id = emu.get("flatpak_id", "").strip()
+    if not flatpak_id:
+        return f"No emulator configured for {system_key.upper()}.\nGo to Settings -> Emulators to set one up."
+    if shutil.which("flatpak") is None:
+        return "flatpak is not installed"
+    if not _is_flatpak_installed(flatpak_id):
+        return f"Flatpak app not installed: {flatpak_id}"
+    return None
+
+
 def validate_launch(rom, config):
     system_key = rom.get("system", "")
     rom_path = rom.get("path", "")
@@ -77,9 +109,20 @@ def validate_launch(rom, config):
         return None
 
     emu = get_emulator_config(system_key, config)
+    launch_type = emu.get("launch_type", "exe")
+
+    if launch_type == "flatpak":
+        return _validate_flatpak_emulator(emu, system_key)
+
     emu_path = _strip_wrapping_quotes(emu.get("path", ""))
     if not emu_path:
         return f"No emulator configured for {system_key.upper()}.\nGo to Settings -> Emulators to set one up."
+
+    if launch_type == "binary":
+        if shutil.which(emu_path) is None:
+            return f"Emulator command not found on PATH: {emu_path}"
+        return None
+
     if not Path(emu_path).is_file():
         return f"Emulator executable not found:\n{emu_path}\n\nCheck the path in Settings -> Emulators."
     return None
@@ -103,9 +146,25 @@ def build_launch_command(rom, config, platform=None, validate=True):
         return [ra, "-L", core, rom_path], None
 
     emu = get_emulator_config(system_key, config)
+    launch_type = emu.get("launch_type", "exe")
+
+    if launch_type == "flatpak":
+        flatpak_id = emu.get("flatpak_id", "").strip()
+        if not flatpak_id:
+            return None, f"No emulator configured for {system_key.upper()}.\nGo to Settings -> Emulators to set one up."
+        extra_args = _split_args_template(emu.get("args", "{rom}"), rom_path, platform=platform)
+        extra_args = [_resolve_core_arg(arg, config, system_key) for arg in extra_args]
+        return ["flatpak", "run", flatpak_id] + extra_args, None
+
     emu_path = _strip_wrapping_quotes(emu.get("path", ""))
     if not emu_path:
         return None, f"No emulator configured for {system_key.upper()}.\nGo to Settings -> Emulators to set one up."
+
+    if launch_type == "binary":
+        resolved = shutil.which(emu_path)
+        if resolved is None:
+            return None, f"Emulator command not found on PATH: {emu_path}"
+        emu_path = resolved
 
     extra_args = _split_args_template(emu.get("args", "{rom}"), rom_path, platform=platform)
     extra_args = [_resolve_core_arg(arg, config, system_key) for arg in extra_args]
