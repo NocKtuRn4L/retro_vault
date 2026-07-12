@@ -1,0 +1,9 @@
+{
+  "custom": {"name": "Custom", "args": "{rom}"},
+  "project64": {"name": "Project64", "args": "\"{rom}\""},
+  "retroarch": {"name": "RetroArch", "args": "-L {core} {rom}"},
+  "mgba": {"name": "mGBA", "args": "\"{rom}\""},
+  "duckstation": {"name": "DuckStation", "args": "\"{rom}\""},
+  "snes9x": {"name": "Snes9x", "args": "\"{rom}\""},
+  "fceux": {"name": "FCEUX", "args": "\"{rom}\""}
+}

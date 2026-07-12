@@ -1,0 +1,177 @@
+{
+  "windows-x86_64": {
+    "nes": {
+      "name": "MesenCE",
+      "profile": "custom",
+      "args": "\"{rom}\"",
+      "url": "https://github.com/nesdev-org/MesenCE/releases",
+      "notes": "Best all-around standalone pick for NES."
+    },
+    "snes": {
+      "name": "MesenCE",
+      "profile": "custom",
+      "args": "\"{rom}\"",
+      "url": "https://github.com/nesdev-org/MesenCE/releases",
+      "notes": "Shared with NES for a simple all-in-one setup."
+    },
+    "gb": {
+      "name": "mGBA",
+      "profile": "mgba",
+      "args": "\"{rom}\"",
+      "url": "https://mgba.io/downloads.html",
+      "notes": "Recommended for GB, GBC, and GBA."
+    },
+    "gbc": {
+      "name": "mGBA",
+      "profile": "mgba",
+      "args": "\"{rom}\"",
+      "url": "https://mgba.io/downloads.html",
+      "notes": "Recommended for GB, GBC, and GBA."
+    },
+    "gba": {
+      "name": "mGBA",
+      "profile": "mgba",
+      "args": "\"{rom}\"",
+      "url": "https://mgba.io/downloads.html",
+      "notes": "Recommended for GB, GBC, and GBA."
+    },
+    "n64": {
+      "name": "Rosalie's Mupen GUI",
+      "profile": "custom",
+      "args": "\"{rom}\"",
+      "url": "https://github.com/Rosalie241/RMG/releases",
+      "notes": "Default N64 recommendation. Project64 remains the familiar Windows alternate."
+    },
+    "psx": {
+      "name": "DuckStation",
+      "profile": "duckstation",
+      "args": "\"{rom}\"",
+      "url": "https://github.com/stenzek/duckstation/releases/tag/latest",
+      "notes": "Requires a BIOS from the user's own console."
+    },
+    "genesis": {
+      "name": "ares",
+      "profile": "custom",
+      "args": "\"{rom}\"",
+      "url": "https://ares-emu.net/download",
+      "notes": "Current Genesis default for Easy Mode."
+    }
+  },
+  "linux-x86_64": {
+    "nes": {
+      "name": "MesenCE",
+      "profile": "custom",
+      "args": "\"{rom}\"",
+      "url": "https://github.com/nesdev-org/MesenCE/releases",
+      "notes": "Best all-around standalone pick for NES."
+    },
+    "snes": {
+      "name": "MesenCE",
+      "profile": "custom",
+      "args": "\"{rom}\"",
+      "url": "https://github.com/nesdev-org/MesenCE/releases",
+      "notes": "Shared with NES for a simple all-in-one setup."
+    },
+    "gb": {
+      "name": "mGBA",
+      "profile": "mgba",
+      "args": "\"{rom}\"",
+      "url": "https://mgba.io/downloads.html",
+      "notes": "Recommended for GB, GBC, and GBA."
+    },
+    "gbc": {
+      "name": "mGBA",
+      "profile": "mgba",
+      "args": "\"{rom}\"",
+      "url": "https://mgba.io/downloads.html",
+      "notes": "Recommended for GB, GBC, and GBA."
+    },
+    "gba": {
+      "name": "mGBA",
+      "profile": "mgba",
+      "args": "\"{rom}\"",
+      "url": "https://mgba.io/downloads.html",
+      "notes": "Recommended for GB, GBC, and GBA."
+    },
+    "n64": {
+      "name": "Rosalie's Mupen GUI",
+      "profile": "custom",
+      "args": "\"{rom}\"",
+      "url": "https://github.com/Rosalie241/RMG/releases",
+      "notes": "Default N64 recommendation. Project64 remains the familiar Windows alternate."
+    },
+    "psx": {
+      "name": "DuckStation",
+      "profile": "duckstation",
+      "args": "\"{rom}\"",
+      "url": "https://github.com/stenzek/duckstation/releases/tag/latest",
+      "notes": "Requires a BIOS from the user's own console."
+    },
+    "genesis": {
+      "name": "RetroArch (Genesis Plus GX)",
+      "profile": "retroarch",
+      "args": "-L {core} {rom}",
+      "url": "https://retroarch.com/",
+      "notes": "ares has no official Linux binaries; the Genesis Plus GX libretro core is the recommended path."
+    }
+  },
+  "linux-aarch64": {
+    "_default_backend": "retroarch",
+    "nes": {
+      "name": "RetroArch (Nestopia)",
+      "profile": "retroarch",
+      "args": "-L {core} {rom}",
+      "url": "https://retroarch.com/",
+      "notes": "RetroArch-first pick for Raspberry Pi 5 (aarch64). Standalone alternate: MesenCE has an official ARM64 release for NES and SNES."
+    },
+    "snes": {
+      "name": "RetroArch (Snes9x)",
+      "profile": "retroarch",
+      "args": "-L {core} {rom}",
+      "url": "https://retroarch.com/",
+      "notes": "RetroArch-first pick for Raspberry Pi 5 (aarch64). Standalone alternate: MesenCE has an official ARM64 release for NES and SNES."
+    },
+    "gb": {
+      "name": "RetroArch (Gambatte)",
+      "profile": "retroarch",
+      "args": "-L {core} {rom}",
+      "url": "https://retroarch.com/",
+      "notes": "RetroArch-first pick for Raspberry Pi 5 (aarch64). Standalone alternate: mGBA is available via apt (mgba-qt) for GB, GBC, and GBA."
+    },
+    "gbc": {
+      "name": "RetroArch (Gambatte)",
+      "profile": "retroarch",
+      "args": "-L {core} {rom}",
+      "url": "https://retroarch.com/",
+      "notes": "RetroArch-first pick for Raspberry Pi 5 (aarch64). Standalone alternate: mGBA is available via apt (mgba-qt) for GB, GBC, and GBA."
+    },
+    "gba": {
+      "name": "RetroArch (mGBA)",
+      "profile": "retroarch",
+      "args": "-L {core} {rom}",
+      "url": "https://retroarch.com/",
+      "notes": "RetroArch-first pick for Raspberry Pi 5 (aarch64). Standalone alternate: mGBA is available via apt (mgba-qt) for GB, GBC, and GBA."
+    },
+    "n64": {
+      "name": "RetroArch (Mupen64Plus-Next)",
+      "profile": "retroarch",
+      "args": "-L {core} {rom}",
+      "url": "https://retroarch.com/",
+      "notes": "RetroArch-first pick for Raspberry Pi 5 (aarch64). Standalone alternate: RMG (Rosalie's Mupen GUI) is available on Flathub for aarch64."
+    },
+    "psx": {
+      "name": "RetroArch (Mednafen PSX HW)",
+      "profile": "retroarch",
+      "args": "-L {core} {rom}",
+      "url": "https://retroarch.com/",
+      "notes": "RetroArch-first pick for Raspberry Pi 5 (aarch64). Standalone alternate: DuckStation ships an official ARM64 AppImage."
+    },
+    "genesis": {
+      "name": "RetroArch (Genesis Plus GX)",
+      "profile": "retroarch",
+      "args": "-L {core} {rom}",
+      "url": "https://retroarch.com/",
+      "notes": "RetroArch-first pick for Raspberry Pi 5 (aarch64) using the Genesis Plus GX core; no standalone ARM64 alternate is currently recommended."
+    }
+  }
+}
