@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "retrovault"
+version = "0.1.0"
+description = "Modular ROM launcher — a cross-platform desktop frontend for external emulator backends"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Games/Entertainment",
+]
+
+[project.scripts]
+retrovault = "retrovault.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["retrovault*"]
+
+[tool.setuptools.package-data]
+retrovault = ["data/*.json", "data/emulators/*.json", "ui/*.qss"]
