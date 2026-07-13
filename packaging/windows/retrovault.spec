@@ -3,7 +3,7 @@
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 
 project_root = Path(SPECPATH).resolve().parents[1]
@@ -13,13 +13,21 @@ datas = collect_data_files(
     "retrovault",
     includes=["data/*", "data/emulators/*.json", "ui/*.qss"],
 )
+# Bundle pygame-ce's own data files (fonts, licenses) so the frozen build is
+# self-contained.
+datas += collect_data_files("pygame")
+
+# pygame-ce ships the native SDL2 libraries as bundled binaries. Collect them
+# explicitly, otherwise the frozen app crashes at runtime with a missing SDL2
+# DLL as soon as the controller backend imports pygame.
+binaries = collect_dynamic_libs("pygame")
 
 analysis = Analysis(
     [str(Path(SPECPATH) / "entrypoint.py")],
     pathex=[str(project_root)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=["pygame"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

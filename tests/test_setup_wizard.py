@@ -1,4 +1,5 @@
 import os
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -32,6 +33,51 @@ class SetupWizardProvisioningTests(unittest.TestCase):
         self.assertEqual(wizard.rows["nes"]["status"].text(), "NEEDED")
         self.assertEqual(wizard.rows["nes"]["detect"].text(), "DETECT")
         self.assertEqual(wizard.rows["nes"]["install"].text(), "INSTALL")
+
+    @mock.patch("retrovault.ui.setup_wizard.discovery.discover_emulators", return_value={})
+    def test_detection_thread_runs_and_finishes(self, discover):
+        wizard = self.make_wizard()
+
+        wizard._detect_all()
+        deadline = time.monotonic() + 2
+        while wizard._threads and time.monotonic() < deadline:
+            self.app.processEvents()
+
+        self.assertFalse(wizard._threads)
+        discover.assert_called_once()
+
+    def test_completed_detection_reports_not_found(self):
+        wizard = self.make_wizard()
+
+        wizard._detection_complete({"mesen-ce": DetectResult(False)})
+
+        self.assertEqual(wizard.rows["nes"]["status"].text(), "NOT FOUND")
+
+    def test_download_progress_is_visible_and_updates_in_place(self):
+        wizard = self.make_wizard()
+        bar = wizard.rows["nes"]["progress"]
+
+        wizard._set_busy(("nes",), True, show_progress=True)
+        self.assertTrue(bar.isHidden())
+        self.assertEqual(wizard.rows["nes"]["status"].text(), "QUEUED")
+        wizard._update_progress("mesen-ce", 25, 100)
+
+        self.assertFalse(bar.isHidden())
+        self.assertEqual(wizard.rows["nes"]["status"].text(), "INSTALLING")
+        self.assertEqual(bar.value(), 25)
+        self.assertEqual(bar.maximum(), 100)
+        self.assertEqual(bar.parentWidget(), wizard.rows["nes"]["path"].parentWidget())
+
+    def test_bulk_progress_only_activates_current_emulator(self):
+        wizard = self.make_wizard()
+        wizard._set_busy(tuple(wizard.rows), True, show_progress=True)
+
+        wizard._update_progress("mesen-ce", 0, 0)
+
+        self.assertFalse(wizard.rows["nes"]["progress"].isHidden())
+        self.assertFalse(wizard.rows["snes"]["progress"].isHidden())
+        self.assertTrue(wizard.rows["n64"]["progress"].isHidden())
+        self.assertEqual(wizard.rows["n64"]["status"].text(), "QUEUED")
 
     def test_detection_wires_found_emulator(self):
         wizard = self.make_wizard()
@@ -96,6 +142,42 @@ class SetupWizardProvisioningTests(unittest.TestCase):
         slot = wizard.config_data["emulators"]["gba"]
         self.assertEqual(slot.get("launch_type", "exe"), "exe")  # untouched by binary path
         self.assertEqual(wizard.rows["gba"]["status"].text(), "READY")
+
+
+    @mock.patch("retrovault.ui.setup_wizard.installer.uninstall", return_value=None)
+    @mock.patch("retrovault.ui.setup_wizard.config_mod.save_config")
+    @mock.patch("retrovault.ui.setup_wizard.audit_mod.load_test_rom_manifest", return_value={})
+    def test_install_then_uninstall_swaps_button_and_clears_slots(self, _manifest, _save, _uninstall):
+        wizard = self.make_wizard()
+        # Install mesen-ce → covers NES and SNES
+        wizard._install_complete({"mesen-ce": Path("C:/Mesen/Mesen.exe")})
+        self.assertEqual(wizard.rows["nes"]["status"].text(), "READY")
+        self.assertEqual(wizard.rows["nes"]["install"].text(), "UNINSTALL")
+        self.assertEqual(wizard.rows["snes"]["install"].text(), "UNINSTALL")
+        self.assertIn("installed_path", wizard.rows["nes"])
+        self.assertIn("installed_path", wizard.rows["snes"])
+
+        # Click UNINSTALL on NES → both NES and SNES clear
+        wizard._toggle_install("nes")
+        self.assertEqual(wizard.rows["nes"]["status"].text(), "NEEDED")
+        self.assertEqual(wizard.rows["snes"]["status"].text(), "NEEDED")
+        self.assertEqual(wizard.rows["nes"]["install"].text(), "INSTALL")
+        self.assertEqual(wizard.rows["snes"]["install"].text(), "INSTALL")
+        self.assertNotIn("installed_path", wizard.rows["nes"])
+        self.assertNotIn("installed_path", wizard.rows["snes"])
+        self.assertEqual(wizard.config_data["emulators"]["nes"]["path"], "")
+        self.assertEqual(wizard.config_data["emulators"]["snes"]["path"], "")
+
+    @mock.patch("retrovault.ui.setup_wizard.installer.uninstall", return_value=None)
+    @mock.patch("retrovault.ui.setup_wizard.config_mod.save_config")
+    @mock.patch("retrovault.ui.setup_wizard.audit_mod.load_test_rom_manifest", return_value={})
+    def test_install_then_install_on_installed_system_does_not_reinstall(self, _manifest, _save, _uninstall):
+        """_toggle_install on a row with installed_path calls uninstall, not install."""
+        wizard = self.make_wizard()
+        with mock.patch.object(wizard, "_install_system") as install_spy:
+            wizard._install_complete({"mesen-ce": Path("C:/Mesen/Mesen.exe")})
+            wizard._toggle_install("nes")
+            install_spy.assert_not_called()
 
 
 if __name__ == "__main__":

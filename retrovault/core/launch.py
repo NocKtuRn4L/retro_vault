@@ -245,3 +245,72 @@ def launch_rom(rom, config):
     except Exception as e:
         logging.exception("Unexpected launch error")
         return False, f"{type(e).__name__}: {e}"
+
+
+def start_launch_process(rom, config):
+    """Build, validate, and start the emulator process, returning a waitable handle.
+
+    Returns a ``(proc, error)`` tuple:
+
+    * ``(subprocess.Popen, None)`` — the process started and can be waited on
+      (``proc.wait()`` / ``proc.poll()``). This is the normal path on POSIX and
+      the normal ``Popen`` path on win32.
+    * ``(None, None)`` — the launch succeeded but is *not* waitable. This only
+      happens on win32 when the direct ``Popen`` failed and we fell back to
+      ShellExecute (``runas`` for elevation or ``open``), which hands the process
+      off to the shell and gives us no handle to wait on. Callers should treat
+      this as "launched, but exit cannot be tracked."
+    * ``(None, error_message)`` — validation or launch failed. The error strings
+      mirror :func:`launch_rom` so existing UI messaging stays consistent.
+
+    Unlike :func:`launch_rom` (fire-and-forget, kept for existing callers), this
+    returns the process handle so a caller can wait for the emulator to exit.
+    """
+    cmd, error = build_launch_command(rom, config)
+    if error:
+        logging.warning("Launch validation failed for %s: %s", rom.get("path"), error)
+        return None, error
+
+    try:
+        logging.info("Launching ROM '%s' with command: %s", rom.get("name"), subprocess.list2cmdline(cmd))
+        if sys.platform == "win32":
+            try:
+                proc = subprocess.Popen(cmd, cwd=_command_working_dir(cmd))
+                logging.info("Launch started with pid %s", proc.pid)
+                return proc, None
+            except PermissionError:
+                logging.info("Popen permission denied; retrying with ShellExecute runas")
+                ret = _windows_shell_execute(cmd, verb="runas")
+            except OSError as e:
+                logging.info("Popen failed with %s; retrying with ShellExecute open", e)
+                ret = _windows_shell_execute(cmd, verb="open")
+            # ShellExecuteW returns > 32 on success
+            if ret <= 32:
+                logging.error("ShellExecute failed with code %s for %s", ret, cmd[0])
+                return None, (
+                    f"ShellExecute failed (code {ret}) launching:\n{cmd[0]}\n\n"
+                    "Make sure the path is correct in Settings → Emulators."
+                )
+            logging.info("Launch handed to ShellExecute with code %s", ret)
+            # Launched, but ShellExecute gives no Popen handle to wait on.
+            return None, None
+
+        proc = subprocess.Popen(cmd, cwd=_command_working_dir(cmd), close_fds=True)
+        logging.info("Launch started with pid %s", proc.pid)
+        return proc, None
+    except FileNotFoundError:
+        logging.exception("Emulator executable not found")
+        return None, (
+            f"Emulator executable not found:\n{cmd[0]}\n\n"
+            "Check the path in Settings → Emulators."
+        )
+    except PermissionError:
+        logging.exception("Permission denied launching emulator")
+        return None, (
+            f"Permission denied launching:\n{cmd[0]}\n\n"
+            "Windows blocked the launch even with elevation.\n"
+            "Try running RetroVault itself as administrator."
+        )
+    except Exception as e:
+        logging.exception("Unexpected launch error")
+        return None, f"{type(e).__name__}: {e}"

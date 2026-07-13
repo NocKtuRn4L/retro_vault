@@ -4,6 +4,7 @@
   "website": "https://github.com/nesdev-org/MesenCE",
   "license": "GPL-3.0-or-later",
   "profiles": [{"systems": ["nes", "snes"], "args": "\"{rom}\""}],
+  "fullscreen": {"mode": "inherit"},
   "detect": {
     "binaries": ["Mesen", "mesen"],
     "windows_paths": ["%LOCALAPPDATA%\\Mesen\\Mesen.exe"]

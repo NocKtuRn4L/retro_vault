@@ -33,6 +33,9 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     argv = _enable_portable_mode(list(argv))
 
+    kiosk = "--kiosk" in argv
+    argv = [arg for arg in argv if arg != "--kiosk"]
+
     from .core.paths import init_app_dirs
     init_app_dirs()
 
@@ -56,7 +59,10 @@ def main(argv=None):
         return
 
     from .ui.app import main as run_gui
-    run_gui()
+    if kiosk:
+        run_gui(window_mode="kiosk")
+    else:
+        run_gui()
 
 
 if __name__ == "__main__":

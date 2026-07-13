@@ -76,6 +76,13 @@ class ManifestValidationTests(unittest.TestCase):
             self.assertEqual(len(strategy.sha256), 64)
             int(strategy.sha256, 16)
 
+    def test_mgba_windows_has_managed_install_strategy(self):
+        strategy = load_shipped_registry().get("mgba").strategy_for("windows-x86_64")
+
+        self.assertEqual(strategy.strategy, "download")
+        self.assertEqual(strategy.archive, "7z")
+        self.assertEqual(strategy.exe, "mGBA.exe")
+
     def test_unknown_keys_warn(self):
         document = valid_manifest()
         document["future_field"] = True

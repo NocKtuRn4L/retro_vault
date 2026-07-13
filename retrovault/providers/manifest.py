@@ -28,6 +28,25 @@ class EmulatorProfile:
 
 
 @dataclass(frozen=True)
+class FullscreenPolicy:
+    """How to make a specific emulator run fullscreen.
+
+    Modes:
+      - "inherit": do nothing; respect the emulator's own saved preference (default).
+      - "arg": pass a launch argument (``arg``), e.g. "--fullscreen" or "-f".
+      - "config": a managed config setting written once at install time, described by
+        ``config_file`` (relative filename / hint), ``config_key`` and ``config_value``.
+        This is metadata only; writing the config is not performed here.
+    """
+
+    mode: str = "inherit"
+    arg: str = ""
+    config_file: str = ""
+    config_key: str = ""
+    config_value: str = ""
+
+
+@dataclass(frozen=True)
 class DetectionRules:
     binaries: tuple[str, ...] = ()
     windows_paths: tuple[str, ...] = ()
@@ -61,6 +80,7 @@ class EmulatorManifest:
     detect: DetectionRules
     install: Mapping[str, InstallStrategy] = field(default_factory=dict)
     cores: Mapping[str, str] = field(default_factory=dict)
+    fullscreen: FullscreenPolicy = field(default_factory=FullscreenPolicy)
 
     def strategy_for(self, platform_key: str) -> InstallStrategy:
         """Resolve the exact platform strategy without crossing OS or architecture."""
@@ -133,10 +153,68 @@ def _parse_strategy(data: Any, context: str) -> InstallStrategy:
     return parsed
 
 
+def _parse_fullscreen(data: Any, context: str) -> FullscreenPolicy:
+    if data is None:
+        return FullscreenPolicy()
+    if not isinstance(data, dict):
+        raise ManifestError(f"{context} must be an object")
+    mode = data.get("mode", "inherit")
+    if mode not in {"inherit", "arg", "config"}:
+        raise ManifestError(f"{context}.mode must be one of inherit, arg, config")
+    if mode == "inherit":
+        _warn_unknown(data, {"mode"}, context)
+        return FullscreenPolicy()
+    if mode == "arg":
+        _warn_unknown(data, {"mode", "arg"}, context)
+        arg = _require_string(data, "arg", context)
+        return FullscreenPolicy(mode="arg", arg=arg)
+    _warn_unknown(data, {"mode", "file", "key", "value"}, context)
+    config_file = _require_string(data, "file", context)
+    config_key = _require_string(data, "key", context)
+    config_value = _require_string(data, "value", context)
+    return FullscreenPolicy(
+        mode="config",
+        config_file=config_file,
+        config_key=config_key,
+        config_value=config_value,
+    )
+
+
+def effective_fullscreen(
+    policy: FullscreenPolicy,
+    config: Mapping[str, Any] | None = None,
+    platform_key: str = "",
+    kiosk: bool = False,
+) -> bool:
+    """Resolve whether the launcher should force fullscreen for an emulator.
+
+    Pure function driven by the global ``fullscreen_preference`` config key:
+      - "force_windowed": never force fullscreen (explicit user override wins).
+      - "prefer": force fullscreen wherever supported, including "inherit" emulators.
+      - "emulator" (default): honor each emulator's own policy — force fullscreen only
+        when the manifest declares an "arg"/"config" mechanism. In Raspberry Pi kiosk
+        mode the launcher runs edge-to-edge, so fullscreen is forced regardless of the
+        per-emulator policy (RetroArch in particular defaults to fullscreen there).
+    """
+    preference = str((config or {}).get("fullscreen_preference", "emulator"))
+    if preference == "force_windowed":
+        return False
+    if preference == "prefer":
+        return True
+    # "emulator" and any unknown value fall through to honoring the manifest policy.
+    if kiosk:
+        return True
+    return policy.mode in {"arg", "config"}
+
+
 def manifest_from_dict(data: Any, context: str = "manifest") -> EmulatorManifest:
     if not isinstance(data, dict):
         raise ManifestError(f"{context} must be an object")
-    _warn_unknown(data, {"id", "name", "website", "license", "profiles", "detect", "install", "cores"}, context)
+    _warn_unknown(
+        data,
+        {"id", "name", "website", "license", "profiles", "detect", "install", "cores", "fullscreen"},
+        context,
+    )
     profiles_data = data.get("profiles")
     if not isinstance(profiles_data, list) or not profiles_data:
         raise ManifestError(f"{context}.profiles must be a non-empty list")
@@ -185,6 +263,7 @@ def manifest_from_dict(data: Any, context: str = "manifest") -> EmulatorManifest
         detect=detection,
         install=installs,
         cores=cores,
+        fullscreen=_parse_fullscreen(data.get("fullscreen"), f"{context}.fullscreen"),
     )
 
 

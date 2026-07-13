@@ -8,7 +8,14 @@ from PySide6.QtWidgets import QApplication
 from .main_window import MainWindow
 
 
-def main():
+def main(window_mode=None):
+    """Launch the RetroVault GUI.
+
+    ``window_mode`` overrides the config-driven window-mode policy
+    (``"desktop"`` | ``"fullscreen"`` | ``"kiosk"``). When ``None`` the mode is
+    resolved from config, defaulting to ``"desktop"`` so normal PC/dev runs stay
+    windowed. Callable with no args for backward compatibility.
+    """
     app = QApplication(sys.argv)
     app.setApplicationName("RetroVault")
 
@@ -16,7 +23,8 @@ def main():
     app.setStyleSheet(theme)
 
     window = MainWindow()
-    window.show()
+    effective = window_mode if window_mode is not None else window.config_data.get("window_mode", "desktop")
+    window.apply_window_mode(effective)
 
     sys.exit(app.exec())
 

@@ -7,6 +7,7 @@
     "systems": ["nes", "snes", "gb", "gbc", "gba", "n64", "psx", "genesis"],
     "args": "-L {core} {rom}"
   }],
+  "fullscreen": {"mode": "arg", "arg": "-f"},
   "cores": {
     "nes": "nestopia_libretro",
     "snes": "snes9x_libretro",
