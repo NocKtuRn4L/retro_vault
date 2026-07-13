@@ -54,29 +54,51 @@ class MainWindowNavTests(unittest.TestCase):
         finally:
             window.close()
 
-    # ── Table navigation ──────────────────────────────────────────────────────
-    def test_up_down_moves_selection(self):
+    # ── Two-column focus model ────────────────────────────────────────────────
+    def test_right_enters_games_left_enters_systems(self):
         window = self._make_window()
         try:
-            # No selection yet -> DOWN selects the first visible row.
-            self._feed(window, Action.DOWN)
-            self.assertEqual(window._selected_proxy_row(), 0)
+            self._feed(window, Action.RIGHT)
+            self.assertEqual(window._nav_column, "games")
+            self._feed(window, Action.LEFT)
+            self.assertEqual(window._nav_column, "systems")
+            # BACK also steps into the systems column.
+            self._feed(window, Action.RIGHT)
+            self._feed(window, Action.BACK)
+            self.assertEqual(window._nav_column, "systems")
+        finally:
+            window.close()
 
+    def test_up_down_moves_games_when_games_column_active(self):
+        window = self._make_window()
+        try:
+            self._feed(window, Action.RIGHT)  # enter games column (auto-selects row 0)
+            self.assertEqual(window._selected_proxy_row(), 0)
             self._feed(window, Action.DOWN)
             self.assertEqual(window._selected_proxy_row(), 1)
-
             self._feed(window, Action.UP)
             self.assertEqual(window._selected_proxy_row(), 0)
-
-            # Clamp at the top.
-            self._feed(window, Action.UP)
+            self._feed(window, Action.UP)  # clamp at top
             self.assertEqual(window._selected_proxy_row(), 0)
+        finally:
+            window.close()
+
+    def test_up_down_moves_systems_when_systems_column_active(self):
+        window = self._make_window()
+        try:
+            self._feed(window, Action.LEFT)  # enter systems column
+            self.assertEqual(window.sidebar.currentRow(), 0)
+            self._feed(window, Action.DOWN)
+            self.assertEqual(window.sidebar.currentRow(), 1)
+            self._feed(window, Action.UP)
+            self.assertEqual(window.sidebar.currentRow(), 0)
         finally:
             window.close()
 
     def test_down_clamps_at_bottom(self):
         window = self._make_window()
         try:
+            self._feed(window, Action.RIGHT)  # games column active
             last = window.proxy.rowCount() - 1
             for _ in range(window.proxy.rowCount() + 3):
                 self._feed(window, Action.DOWN)
@@ -84,18 +106,18 @@ class MainWindowNavTests(unittest.TestCase):
         finally:
             window.close()
 
-    # ── Sidebar / system filter navigation ────────────────────────────────────
-    def test_right_left_changes_sidebar(self):
+    def test_accept_in_systems_column_drills_into_games(self):
         window = self._make_window()
         try:
-            self.assertEqual(window.sidebar.currentRow(), 0)
-            self._feed(window, Action.RIGHT)
-            self.assertEqual(window.sidebar.currentRow(), 1)
-            self._feed(window, Action.LEFT)
-            self.assertEqual(window.sidebar.currentRow(), 0)
+            self._feed(window, Action.LEFT)  # systems column
+            window.on_launch_selected = mock.Mock()
+            self._feed(window, Action.ACCEPT)
+            self.assertEqual(window._nav_column, "games")
+            window.on_launch_selected.assert_not_called()  # drills in, does not launch
         finally:
             window.close()
 
+    # ── Sidebar / system filter navigation ────────────────────────────────────
     def test_next_prev_system_changes_sidebar(self):
         window = self._make_window()
         try:

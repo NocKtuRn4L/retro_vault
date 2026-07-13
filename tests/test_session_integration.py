@@ -115,15 +115,17 @@ class SessionIntegrationTests(unittest.TestCase):
         finally:
             window.close()
 
-    # ── input_disabled(True): suspend + disable ──────────────────────────────
-    def test_input_disabled_true_pauses_controller_and_disables_controls(self):
+    # ── input_disabled(True): release + disable ───────────────────────────────
+    def test_input_disabled_true_releases_controller_and_disables_controls(self):
         window, session = self._make_window()
         try:
-            with mock.patch.object(window.controller, "pause") as pause:
+            # The launch path fully releases (stops) the controller so the
+            # emulator gets uncontested access to the physical device.
+            with mock.patch.object(window.controller, "stop") as stop:
                 window._select_proxy_row(0)
                 window.on_launch_selected()  # emits input_disabled(True) synchronously
                 self.assertTrue(window._controller_busy)
-                pause.assert_called_once()
+                stop.assert_called_once()
                 self.assertFalse(window.centralWidget().isEnabled())
         finally:
             window.close()
@@ -140,7 +142,7 @@ class SessionIntegrationTests(unittest.TestCase):
 
             with (
                 mock.patch.object(window, "restore_foreground") as restore_fg,
-                mock.patch.object(window.controller, "resume") as resume,
+                mock.patch.object(window.controller, "start") as start,
             ):
                 window.on_launch_selected()
                 session.started.emit()
@@ -161,13 +163,14 @@ class SessionIntegrationTests(unittest.TestCase):
                 self.assertEqual(
                     window._selected_rom().get("path"), "/roms/bravo.nes"
                 )
-                # ...but the controller must NOT be resumed synchronously.
-                resume.assert_not_called()
+                # ...but the controller must NOT be re-acquired synchronously.
+                start.assert_not_called()
                 self.assertTrue(window._controller_busy)
 
-                # After the debounce elapses, resume fires and busy clears.
+                # After the debounce elapses, the controller is re-acquired and
+                # the busy guard clears.
                 self._wait_past_debounce()
-                resume.assert_called_once()
+                start.assert_called_once()
                 self.assertFalse(window._controller_busy)
         finally:
             window.close()
@@ -175,12 +178,12 @@ class SessionIntegrationTests(unittest.TestCase):
     def test_input_disabled_false_does_not_resume_synchronously(self):
         window, session = self._make_window()
         try:
-            with mock.patch.object(window.controller, "resume") as resume:
+            with mock.patch.object(window.controller, "start") as start:
                 window._select_proxy_row(0)
                 window.on_launch_selected()
                 # Drive the disable(False) handler directly.
                 window._on_launch_input_disabled(False)
-                resume.assert_not_called()
+                start.assert_not_called()
                 self.assertTrue(window.centralWidget().isEnabled())
         finally:
             window.close()
@@ -192,7 +195,7 @@ class SessionIntegrationTests(unittest.TestCase):
             with (
                 mock.patch.object(mw.QMessageBox, "warning") as warning,
                 mock.patch.object(window, "restore_foreground") as restore_fg,
-                mock.patch.object(window.controller, "resume") as resume,
+                mock.patch.object(window.controller, "start") as start,
             ):
                 window._select_proxy_row(0)
                 window.on_launch_selected()
@@ -202,10 +205,10 @@ class SessionIntegrationTests(unittest.TestCase):
                 self.assertEqual(warning.call_args.args[2], "boom")
                 restore_fg.assert_called()
                 self.assertTrue(window.centralWidget().isEnabled())
-                resume.assert_not_called()  # debounced
+                start.assert_not_called()  # debounced
 
                 self._wait_past_debounce()
-                resume.assert_called_once()
+                start.assert_called_once()
                 self.assertFalse(window._controller_busy)
         finally:
             window.close()
@@ -216,7 +219,7 @@ class SessionIntegrationTests(unittest.TestCase):
         try:
             with (
                 mock.patch.object(mw.QMessageBox, "warning") as warning,
-                mock.patch.object(window.controller, "resume") as resume,
+                mock.patch.object(window.controller, "start") as start,
             ):
                 window._select_proxy_row(0)
                 window.on_launch_selected()
@@ -233,7 +236,7 @@ class SessionIntegrationTests(unittest.TestCase):
                 self.assertTrue(window.centralWidget().isEnabled())
 
                 self._wait_past_debounce()
-                resume.assert_called_once()
+                start.assert_called_once()
                 self.assertFalse(window._controller_busy)
         finally:
             window.close()

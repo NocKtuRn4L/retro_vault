@@ -85,6 +85,8 @@ class MainWindow(QMainWindow):
         self.controller = None
         self._controller_busy = False
         self._settings_open = False
+        # Which column controller Up/Down navigates: "systems" or "games".
+        self._nav_column = "games"
 
         # Launch-session integration (PR10). Built after the controller below.
         self.launch_coordinator = None
@@ -360,19 +362,52 @@ class MainWindow(QMainWindow):
             return
         action = event.action
         if action in (Action.UP, Action.DOWN):
-            self._move_table_selection(-1 if action is Action.UP else 1)
-        elif action in (Action.LEFT, Action.PREV_SYSTEM):
+            # Up/Down navigate within whichever column currently has focus.
+            self._nav_move(-1 if action is Action.UP else 1)
+        elif action in (Action.LEFT, Action.BACK):
+            # Left/Back step into the systems column (pick NES, N64, ...).
+            self._focus_systems_column()
+        elif action is Action.RIGHT:
+            # Right steps into the games column.
+            self._focus_games_column()
+        elif action is Action.PREV_SYSTEM:
+            # Shoulders quick-cycle the system filter regardless of focus.
             self._move_sidebar_selection(-1)
-        elif action in (Action.RIGHT, Action.NEXT_SYSTEM):
+        elif action is Action.NEXT_SYSTEM:
             self._move_sidebar_selection(1)
         elif action is Action.ACCEPT:
-            self.on_launch_selected()
-        elif action is Action.BACK:
-            self._focus_game_list()
+            # In the systems column, Accept drills into the games; in the games
+            # column it launches the selected ROM.
+            if self._nav_column == "systems":
+                self._focus_games_column()
+            else:
+                self.on_launch_selected()
         elif action is Action.MENU:
             # The Settings dialog currently holds emulator configuration; a
             # dedicated Emulator Manager may replace this call in a later PR.
             self._open_menu()
+
+    def _nav_move(self, delta):
+        """Move selection by ``delta`` within the active column (systems/games)."""
+        if self._nav_column == "systems":
+            self._move_sidebar_selection(delta)
+        else:
+            self._move_table_selection(delta)
+
+    def _focus_systems_column(self):
+        """Make the systems sidebar the active column, ensuring a row is current."""
+        if self.sidebar.count() == 0:
+            return
+        self._nav_column = "systems"
+        if self.sidebar.currentRow() < 0:
+            self.sidebar.setCurrentRow(0)
+        self.sidebar.setFocus()
+
+    def _focus_games_column(self):
+        """Make the games table the active column, selecting the first ROM if none."""
+        self._nav_column = "games"
+        self.table.setFocus()
+        self._select_first_visible_row()
 
     def _selected_proxy_row(self):
         indexes = self.table.selectionModel().selectedRows()
@@ -422,15 +457,6 @@ class MainWindow(QMainWindow):
             self.sidebar.setCurrentRow(target)
         # After changing the filter, auto-select the first visible ROM.
         self._select_first_visible_row()
-
-    def _focus_game_list(self):
-        """BACK: escape back to the game list from search/sidebar."""
-        focused = QApplication.focusWidget()
-        if focused is self.search_box or focused is self.sidebar:
-            self.table.setFocus()
-            self._select_first_visible_row()
-        else:
-            self.table.setFocus()
 
     def _open_menu(self):
         """MENU: open the settings/emulator manager, guarding reentrancy."""
@@ -644,7 +670,15 @@ class MainWindow(QMainWindow):
         """
         central = self.centralWidget()
         if disabled:
-            self._set_controller_busy(True)  # pauses controller polling
+            # Fully RELEASE the controller (not just pause) so the launched
+            # emulator has uncontested access to the physical device — RetroVault
+            # must never sit between the pad and the emulator during play.
+            self._controller_busy = True
+            if self.controller:
+                try:
+                    self.controller.stop()
+                except Exception:  # pragma: no cover - release is best-effort
+                    pass
             if central is not None:
                 central.setEnabled(False)
         else:
@@ -671,12 +705,17 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(CONTROLLER_RESUME_DEBOUNCE_MS, self._resume_controller_now)
 
     def _resume_controller_now(self):
-        """Clear the busy guard and resume controller polling (post-debounce)."""
+        """Re-acquire the controller after a session (post-debounce).
+
+        Uses ``start()`` rather than ``resume()`` so the device released in
+        :meth:`_on_launch_input_disabled` is re-opened and re-detected (also
+        picks up a pad that was hot-plugged while the emulator ran).
+        """
         self._controller_busy = False
         if not self.controller:
             return
         try:
-            self.controller.resume()
+            self.controller.start()
         except Exception:  # pragma: no cover - resume is a nice-to-have
             pass
 
