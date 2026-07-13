@@ -148,12 +148,14 @@ class MainWindowNavTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_menu_opens_settings(self):
+    def test_menu_opens_main_menu(self):
         window = self._make_window()
         try:
-            window.on_settings = mock.Mock()
-            self._feed(window, Action.MENU)
-            window.on_settings.assert_called_once()
+            # Patch the dialog so exec() does not block; MENU must open it.
+            with mock.patch.object(mw, "MainMenuDialog") as dialog_cls:
+                dialog_cls.return_value.exec.return_value = 0  # Rejected
+                self._feed(window, Action.MENU)
+                dialog_cls.assert_called_once()
         finally:
             window.close()
 

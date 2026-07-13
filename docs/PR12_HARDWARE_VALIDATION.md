@@ -43,8 +43,14 @@ For **each** of: Xbox (wired), Xbox (Bluetooth), DualShock 4 / DualSense, Switch
 - [ ] D-pad up/down moves the game row; left/right (and L/R shoulders) change the system filter.
 - [ ] Left stick navigates with dead-zone applied — no drift when released; hysteresis prevents chatter at the threshold.
 - [ ] Held direction: single step, then auto-repeat after the delay at a steady rate; release stops immediately.
-- [ ] Start opens the emulator/settings manager; Back escapes focus to the game list.
+- [ ] Left/Back enter the systems column, Right enters the games column, Up/Down move within the active column, Accept drills systems→games / launches in games.
+- [ ] Start opens the on-screen **main menu**; Scan ROMs, Setup Wizard, Settings, and Exit are all reachable and activatable with only the controller.
 - [ ] Accept launches the selected ROM.
+
+> Known gamepad-only gaps (need an on-screen keyboard / are inherently
+> mouse-driven): the **search** field (text entry) and the **folder picker**
+> used by "Add ROM Folder" / Settings → ROM Dirs. Pre-seed ROM dirs for a pure
+> kiosk setup; emulator provisioning itself is controller-navigable in Setup.
 - [ ] Measure **input-to-action latency < 20 ms** (visually acceptable; use high-speed capture if available).
 - [ ] Idle CPU with controller connected stays negligible.
 

@@ -36,6 +36,7 @@ from ..input.router import ControllerRouter, InputStateMachine
 from ..input.sdl_backend import SdlBackend
 from .launch_overlay import LaunchCoordinator
 from .library_model import LibraryFilterProxyModel, LibraryModel
+from .main_menu import MainMenuDialog
 from .settings_dialog import SettingsDialog
 from .setup_wizard import SetupWizard
 
@@ -84,7 +85,7 @@ class MainWindow(QMainWindow):
         # built at the end of __init__ inside a try/except.
         self.controller = None
         self._controller_busy = False
-        self._settings_open = False
+        self._menu_open = False
         # Which column controller Up/Down navigates: "systems" or "games".
         self._nav_column = "games"
 
@@ -458,15 +459,36 @@ class MainWindow(QMainWindow):
         # After changing the filter, auto-select the first visible ROM.
         self._select_first_visible_row()
 
+    def _menu_actions(self):
+        """The top-bar actions exposed to the controller, as (label, callback)."""
+        return [
+            ("Scan ROMs", self.on_scan_roms),
+            ("Add ROM Folder", self.on_add_rom_dir),
+            ("Setup Wizard", self.on_setup),
+            ("Settings", self.on_settings),
+            ("Exit RetroVault", self.close),
+        ]
+
     def _open_menu(self):
-        """MENU: open the settings/emulator manager, guarding reentrancy."""
-        if self._settings_open:
+        """MENU: open the controller-navigable main menu, guarding reentrancy.
+
+        This is the only way to reach the top-bar actions (scan, setup, settings,
+        quit) without a mouse/keyboard — essential for Pi/kiosk use.
+        """
+        if self._menu_open:
             return
-        self._settings_open = True
+        self._menu_open = True
         try:
-            self.on_settings()
+            actions = self._menu_actions()
+            dialog = MainMenuDialog([label for label, _ in actions], self)
+            chose = dialog.exec() == QDialog.DialogCode.Accepted
+            index = dialog.chosen_index
         finally:
-            self._settings_open = False
+            self._menu_open = False
+        # Run the chosen action AFTER the menu closes so any dialog it opens
+        # (Settings/Setup) becomes the active modal cleanly.
+        if chose and 0 <= index < len(actions):
+            actions[index][1]()
 
     def _selected_rom(self):
         indexes = self.table.selectionModel().selectedRows()
