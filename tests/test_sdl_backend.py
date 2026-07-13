@@ -24,7 +24,7 @@ from retrovault.input.backend import (
     Backend,
     BackendState,
 )
-from retrovault.input.sdl_backend import SdlBackend, normalize_state
+from retrovault.input.sdl_backend import SdlBackend, _controller_button_map, normalize_state
 
 try:
     import pygame  # noqa: F401
@@ -32,6 +32,65 @@ try:
     PYGAME_AVAILABLE = True
 except ImportError:
     PYGAME_AVAILABLE = False
+
+
+class _FakePygameConstants:
+    """Minimal stand-in exposing the SDL CONTROLLER_BUTTON_* constants."""
+
+    CONTROLLER_BUTTON_A = 0
+    CONTROLLER_BUTTON_B = 1
+    CONTROLLER_BUTTON_X = 2
+    CONTROLLER_BUTTON_Y = 3
+    CONTROLLER_BUTTON_BACK = 4
+    CONTROLLER_BUTTON_START = 6
+    CONTROLLER_BUTTON_LEFTSHOULDER = 9
+    CONTROLLER_BUTTON_RIGHTSHOULDER = 10
+    CONTROLLER_BUTTON_DPAD_UP = 11
+    CONTROLLER_BUTTON_DPAD_DOWN = 12
+    CONTROLLER_BUTTON_DPAD_LEFT = 13
+    CONTROLLER_BUTTON_DPAD_RIGHT = 14
+
+
+class ControllerButtonMapTests(unittest.TestCase):
+    """The GameController button-constant -> semantic mapping; no pygame needed."""
+
+    def test_map_covers_face_dpad_shoulders_and_menu_buttons(self):
+        mapping = _controller_button_map(_FakePygameConstants())
+        self.assertEqual(mapping[0], BTN_FACE_SOUTH)  # A is always the south face button
+        self.assertEqual(mapping[1], BTN_FACE_EAST)
+        self.assertEqual(mapping[2], BTN_FACE_WEST)
+        self.assertEqual(mapping[3], BTN_FACE_NORTH)
+        self.assertEqual(mapping[9], BTN_SHOULDER_L)
+        self.assertEqual(mapping[10], BTN_SHOULDER_R)
+        self.assertEqual(mapping[4], BTN_BACK)
+        self.assertEqual(mapping[6], BTN_START)
+        # The D-pad is delivered as buttons (a Switch Pro Controller has no hat).
+        self.assertEqual(mapping[11], BTN_DPAD_UP)
+        self.assertEqual(mapping[12], BTN_DPAD_DOWN)
+        self.assertEqual(mapping[13], BTN_DPAD_LEFT)
+        self.assertEqual(mapping[14], BTN_DPAD_RIGHT)
+
+    def test_map_has_all_four_dpad_directions(self):
+        values = set(_controller_button_map(_FakePygameConstants()).values())
+        self.assertTrue({BTN_DPAD_UP, BTN_DPAD_DOWN, BTN_DPAD_LEFT, BTN_DPAD_RIGHT} <= values)
+
+
+@unittest.skipUnless(PYGAME_AVAILABLE, "pygame-ce is not installed")
+class HeadlessHintTests(unittest.TestCase):
+    """start() must configure SDL for windowless input or the pad reads dead."""
+
+    def test_start_sets_headless_video_and_background_event_hints(self):
+        import os
+
+        backend = SdlBackend()
+        try:
+            backend.start()
+            # Both are required: the dummy driver lets the event queue pump, and
+            # the background-events hint stops SDL dropping input with no window.
+            self.assertIsNotNone(os.environ.get("SDL_VIDEODRIVER"))
+            self.assertEqual(os.environ.get("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"), "1")
+        finally:
+            backend.stop()
 
 
 class NormalizeStateTests(unittest.TestCase):

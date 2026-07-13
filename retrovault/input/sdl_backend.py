@@ -1,10 +1,10 @@
 """SDL/pygame-ce controller backend.
 
 Implements the :class:`~retrovault.input.backend.Backend` protocol on top of
-``pygame-ce``'s joystick API. It is deliberately *passive*: it holds no thread
-and does no work unless :meth:`SdlBackend.poll` is called. The owner (the input
-router) MUST stop polling this backend while an emulator session is active, so
-RetroVault and the launched emulator never fight over the same controller.
+``pygame-ce``. It is deliberately *passive*: it holds no thread and does no work
+unless :meth:`SdlBackend.poll` is called. The owner (the input router) MUST stop
+polling this backend while an emulator session is active, so RetroVault and the
+launched emulator never fight over the same controller.
 
 ``pygame`` is imported lazily *inside* methods, never at module import time, so
 this module imports cleanly on machines (and in CI/packaging) where pygame-ce is
@@ -12,19 +12,30 @@ not installed. When pygame is unavailable :meth:`SdlBackend.start` degrades
 gracefully: it logs a warning, stays disconnected, and :meth:`poll` returns
 :data:`~retrovault.input.backend.NEUTRAL_STATE`.
 
-The raw-to-semantic mapping is factored into the pure :func:`normalize_state`
-function so it can be unit-tested with plain Python values and no real hardware.
+Two SDL details that are easy to get wrong and were the cause of "the controller
+does nothing":
 
-Button-index mapping targets the SDL2 default game-controller layout for a
-typical Xbox-style pad:
+1. **The event queue must be pumped for input state to update.** SDL only
+   refreshes joystick/controller button and axis values while the event queue is
+   processed (``pygame.event.pump``/``get``). That in turn requires SDL's *video*
+   subsystem to be initialized. We do NOT want a visible window, so we force the
+   **dummy video driver** (``SDL_VIDEODRIVER=dummy``) before init: events pump,
+   input updates, and no window ever appears. Without this, every read returns a
+   frozen neutral state and the controller looks dead.
 
-    0 -> A  (FACE_SOUTH)      4 -> Left shoulder  (SHOULDER_L)
-    1 -> B  (FACE_EAST)       5 -> Right shoulder (SHOULDER_R)
-    2 -> X  (FACE_WEST)       6 -> Back           (BACK)
-    3 -> Y  (FACE_NORTH)      7 -> Start          (START)
+2. **Not every pad exposes a D-pad hat.** A Nintendo Switch Pro Controller, for
+   example, reports zero hats and puts the D-pad on buttons, with a Nintendo
+   face-button layout that does not match a raw Xbox button-index guess. So the
+   primary path uses SDL's **GameController** API
+   (``pygame._sdl2.controller``), whose community mapping database normalizes
+   Xbox / PlayStation / Switch pads to the same semantic buttons (including the
+   D-pad and a position-correct A=south face button). Devices SDL does not
+   recognize as game controllers fall back to the raw joystick mapping in the
+   pure :func:`normalize_state` helper.
 """
 
 import logging
+import os
 from collections.abc import Iterable
 
 from .backend import (
@@ -46,7 +57,9 @@ from .backend import (
 
 logger = logging.getLogger(__name__)
 
-# SDL2 default game-controller button indices -> semantic button names.
+# Raw-joystick fallback: SDL2 default game-controller button indices for a
+# typical Xbox-style pad -> semantic button names. Only used for devices SDL
+# does not recognize as game controllers.
 _BUTTON_MAP: dict[int, str] = {
     0: BTN_FACE_SOUTH,
     1: BTN_FACE_EAST,
@@ -58,8 +71,36 @@ _BUTTON_MAP: dict[int, str] = {
     7: BTN_START,
 }
 
+# SDL GameController axis full-scale (Sint16) used to normalize sticks to [-1, 1].
+_AXIS_FULL_SCALE = 32767.0
+
 # Rescan every N poll() calls to catch adds/removes the event queue may miss.
 _RESCAN_EVERY = 120
+
+
+def _controller_button_map(pygame) -> dict[int, str]:
+    """Build the SDL GameController button-constant -> semantic-name mapping.
+
+    Uses ``pygame.CONTROLLER_BUTTON_*`` constants so the D-pad (which many pads,
+    e.g. the Switch Pro Controller, expose as buttons rather than a hat) and the
+    face buttons map correctly regardless of the pad's brand. SDL maps
+    ``CONTROLLER_BUTTON_A`` to the physical south (bottom) face button on every
+    controller, so south stays "accept" across Xbox/PlayStation/Switch.
+    """
+    return {
+        pygame.CONTROLLER_BUTTON_A: BTN_FACE_SOUTH,
+        pygame.CONTROLLER_BUTTON_B: BTN_FACE_EAST,
+        pygame.CONTROLLER_BUTTON_X: BTN_FACE_WEST,
+        pygame.CONTROLLER_BUTTON_Y: BTN_FACE_NORTH,
+        pygame.CONTROLLER_BUTTON_LEFTSHOULDER: BTN_SHOULDER_L,
+        pygame.CONTROLLER_BUTTON_RIGHTSHOULDER: BTN_SHOULDER_R,
+        pygame.CONTROLLER_BUTTON_BACK: BTN_BACK,
+        pygame.CONTROLLER_BUTTON_START: BTN_START,
+        pygame.CONTROLLER_BUTTON_DPAD_UP: BTN_DPAD_UP,
+        pygame.CONTROLLER_BUTTON_DPAD_DOWN: BTN_DPAD_DOWN,
+        pygame.CONTROLLER_BUTTON_DPAD_LEFT: BTN_DPAD_LEFT,
+        pygame.CONTROLLER_BUTTON_DPAD_RIGHT: BTN_DPAD_RIGHT,
+    }
 
 
 def _clamp(value: float) -> float:
@@ -130,18 +171,22 @@ class SdlBackend:
 
     def __init__(self, rescan_every: int = _RESCAN_EVERY) -> None:
         self._pygame = None  # lazily-imported pygame module, or None if absent
-        self._joystick = None  # the currently open joystick, or None
+        self._controller_mod = None  # pygame._sdl2.controller module, or None
+        self._controller = None  # an open GameController, or None
+        self._button_map: dict[int, str] = {}  # controller-button const -> name
+        self._joystick = None  # raw-joystick fallback handle, or None
         self._started = False
         self._rescan_every = max(1, rescan_every)
         self._poll_count = 0
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
     def start(self) -> None:
-        """Initialize the joystick subsystem and open any connected controller.
+        """Initialize SDL for controller input without opening a visible window.
 
-        Does NOT open a display/window. If pygame-ce is not installed, logs a
-        warning and stays disconnected; the backend then behaves like a null
-        backend.
+        Forces the dummy video driver so the event queue can be pumped (required
+        for input state to update) while no window is ever shown. If pygame-ce is
+        not installed, logs a warning and stays disconnected; the backend then
+        behaves like a null backend.
         """
         if self._started:
             return
@@ -154,19 +199,45 @@ class SdlBackend:
             return
 
         self._pygame = pygame
-        # Init ONLY the joystick subsystem — no display/window is created.
+        # Force a headless video driver BEFORE init so SDL can run its event
+        # queue (needed for input updates) without ever creating a window.
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        # Without a focused SDL window, Windows/SDL otherwise DROP all joystick
+        # input; this hint tells SDL to keep delivering controller events even
+        # though we never show a window. Required for the pad to work at all.
+        os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
+        try:
+            pygame.display.init()
+        except Exception:  # pragma: no cover - defensive; input may still work
+            logger.debug("pygame.display.init failed", exc_info=True)
         pygame.joystick.init()
+        try:
+            from pygame._sdl2 import controller
+
+            controller.init()
+            self._controller_mod = controller
+            self._button_map = _controller_button_map(pygame)
+        except Exception:  # pragma: no cover - fall back to raw joystick
+            logger.debug("SDL GameController API unavailable", exc_info=True)
+            self._controller_mod = None
         self._started = True
-        self._open_first_joystick()
+        self._open_first_device()
 
     def stop(self) -> None:
-        """Release the joystick and quit the joystick subsystem."""
-        if self._joystick is not None:
+        """Release any open device and quit the SDL input subsystems."""
+        for handle in (self._controller, self._joystick):
             try:
-                self._joystick.quit()
+                if handle is not None:
+                    handle.quit()
             except Exception:  # pragma: no cover - defensive cleanup
-                logger.debug("error quitting joystick", exc_info=True)
+                logger.debug("error quitting input device", exc_info=True)
+        self._controller = None
         self._joystick = None
+        if self._controller_mod is not None:
+            try:
+                self._controller_mod.quit()
+            except Exception:  # pragma: no cover - defensive cleanup
+                logger.debug("error quitting controller subsystem", exc_info=True)
         if self._pygame is not None:
             try:
                 self._pygame.joystick.quit()
@@ -175,37 +246,51 @@ class SdlBackend:
         self._started = False
 
     # ── device management ─────────────────────────────────────────────────────
-    def _open_first_joystick(self) -> None:
-        """Open the first available joystick, if any and none is open yet."""
-        if self._pygame is None or self._joystick is not None:
+    def _open_first_device(self) -> None:
+        """Open the first connected device, preferring the GameController API.
+
+        Devices SDL recognizes as game controllers are opened via the
+        GameController API (normalized mapping). Anything else falls back to the
+        raw joystick handle.
+        """
+        if self._pygame is None or self._controller is not None or self._joystick is not None:
             return
+        controller = self._controller_mod
+        if controller is not None:
+            try:
+                for index in range(controller.get_count()):
+                    if controller.is_controller(index):
+                        self._controller = controller.Controller(index)
+                        return
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("failed to open game controller", exc_info=True)
+                self._controller = None
+        # Fall back to a raw joystick for unrecognized devices.
         try:
-            count = self._pygame.joystick.get_count()
-        except Exception:  # pragma: no cover - defensive
-            return
-        if count <= 0:
-            return
-        try:
-            joystick = self._pygame.joystick.Joystick(0)
-            # pygame-ce auto-initializes Joystick objects; only call init() on
-            # older builds that construct them uninitialized (avoids a
-            # deprecation warning on 2.4+).
-            if not joystick.get_init():
-                joystick.init()
-            self._joystick = joystick
+            if self._pygame.joystick.get_count() > 0:
+                joystick = self._pygame.joystick.Joystick(0)
+                if not joystick.get_init():
+                    joystick.init()
+                self._joystick = joystick
         except Exception:  # pragma: no cover - defensive
             logger.debug("failed to open joystick", exc_info=True)
             self._joystick = None
 
     def rescan(self) -> None:
-        """Re-detect controllers: drop a stale handle and (re)open a device.
+        """Re-detect devices: drop stale handles and (re)open a device.
 
         Safe to call at any time; used both on hotplug events and periodically
         from :meth:`poll` so reconnects are picked up without a restart.
         """
         if self._pygame is None:
             return
-        # Drop a joystick that is no longer attached.
+        if self._controller is not None:
+            try:
+                attached = self._controller.attached()
+            except Exception:
+                attached = False
+            if not attached:
+                self._controller = None
         if self._joystick is not None:
             try:
                 attached = self._joystick.get_init() and self._joystick.get_instance_id() is not None
@@ -213,41 +298,39 @@ class SdlBackend:
                 attached = False
             if not attached:
                 self._joystick = None
-        if self._joystick is None:
-            self._open_first_joystick()
+        if self._controller is None and self._joystick is None:
+            self._open_first_device()
 
     def is_connected(self) -> bool:
-        """Return whether at least one controller is currently open."""
-        return self._joystick is not None
+        """Return whether a controller or joystick is currently open."""
+        return self._controller is not None or self._joystick is not None
 
     # ── polling ───────────────────────────────────────────────────────────────
     def poll(self) -> BackendState:
-        """Pump events and return the first controller's normalized state.
+        """Pump events and return the open device's normalized state.
 
-        Cheap and non-blocking: it pumps the event queue, reads the current
-        controller state, and returns. It never sleeps or spins. Returns
-        :data:`NEUTRAL_STATE` when pygame is unavailable or no controller is
-        connected.
+        Cheap and non-blocking: it pumps the event queue (so SDL refreshes input
+        state), reads the current device state, and returns. It never sleeps or
+        spins. Returns :data:`NEUTRAL_STATE` when pygame is unavailable or no
+        device is connected.
         """
         pygame = self._pygame
         if pygame is None:
             return NEUTRAL_STATE
 
-        # Pump the event queue and react to hotplug events. The event
-        # subsystem may be unavailable when only the joystick subsystem was
-        # initialized (no display/window is opened by design); in that case we
-        # skip event handling and rely on the periodic rescan below. Joystick
-        # state can still be read directly.
+        # Pumping the queue is what makes SDL refresh button/axis state; also
+        # react to hotplug events. With the dummy video driver initialized in
+        # start(), this succeeds without a window.
         try:
             events = pygame.event.get()
         except pygame.error:
             events = []
+        added = {getattr(pygame, "CONTROLLERDEVICEADDED", -1), getattr(pygame, "JOYDEVICEADDED", -2)}
+        removed = {getattr(pygame, "CONTROLLERDEVICEREMOVED", -3), getattr(pygame, "JOYDEVICEREMOVED", -4)}
         for event in events:
-            etype = event.type
-            if etype == pygame.JOYDEVICEADDED:
-                if self._joystick is None:
-                    self._open_first_joystick()
-            elif etype == pygame.JOYDEVICEREMOVED:
+            if event.type in added and not self.is_connected():
+                self._open_first_device()
+            elif event.type in removed:
                 self.rescan()
 
         # Periodic rescan to catch anything the event queue missed.
@@ -255,18 +338,37 @@ class SdlBackend:
         if self._poll_count % self._rescan_every == 0:
             self.rescan()
 
-        joystick = self._joystick
-        if joystick is None:
-            return NEUTRAL_STATE
+        if self._controller is not None:
+            return self._read_controller()
+        if self._joystick is not None:
+            return self._read_joystick()
+        return NEUTRAL_STATE
 
+    def _read_controller(self) -> BackendState:
+        """Read the open GameController via SDL's normalized button/axis API."""
+        controller = self._controller
+        pygame = self._pygame
+        try:
+            buttons = {
+                name for const, name in self._button_map.items() if controller.get_button(const)
+            }
+            axis_x = controller.get_axis(pygame.CONTROLLER_AXIS_LEFTX) / _AXIS_FULL_SCALE
+            axis_y = controller.get_axis(pygame.CONTROLLER_AXIS_LEFTY) / _AXIS_FULL_SCALE
+        except Exception:
+            # Controller likely disconnected mid-read; drop it and report neutral.
+            self._controller = None
+            return NEUTRAL_STATE
+        return BackendState(buttons=frozenset(buttons), axes=(_clamp(axis_x), _clamp(axis_y)))
+
+    def _read_joystick(self) -> BackendState:
+        """Read the raw-joystick fallback and map it via :func:`normalize_state`."""
+        joystick = self._joystick
         try:
             hat = joystick.get_hat(0) if joystick.get_numhats() > 0 else (0, 0)
             num_axes = joystick.get_numaxes()
             axes = [joystick.get_axis(i) for i in range(min(2, num_axes))]
             pressed = [i for i in range(joystick.get_numbuttons()) if joystick.get_button(i)]
         except Exception:
-            # Controller likely disconnected mid-read; drop it and report neutral.
             self._joystick = None
             return NEUTRAL_STATE
-
         return normalize_state(hat, axes, pressed)

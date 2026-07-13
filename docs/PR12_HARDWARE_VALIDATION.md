@@ -17,6 +17,23 @@ retrovault-controller --self-test # no-hardware pipeline check (also runs in CI)
 > `--once` may report "controller detected: yes" with no gamepad plugged in.
 > Use `--watch` and confirm real button/axis movement.
 
+### Why the pad works with no visible SDL window (Windows gotchas)
+
+`SdlBackend` runs SDL headlessly (RetroVault's UI is Qt, not SDL). Two SDL
+settings are load-bearing — if either regresses, the pad goes completely dead
+while still reporting "detected":
+
+- `SDL_VIDEODRIVER=dummy` — SDL only refreshes controller state while its event
+  queue is pumped, which needs the video subsystem. The dummy driver enables the
+  queue with no window.
+- `SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=1` — without a focused SDL window,
+  Windows/SDL drop all joystick input. This hint keeps events flowing.
+
+Input is read through SDL's **GameController** API (`pygame._sdl2.controller`),
+whose mapping database normalizes Xbox / PlayStation / Switch pads — including
+pads like the Switch Pro Controller that expose the D-pad as buttons (zero hats)
+rather than a hat. Unrecognized devices fall back to the raw-joystick mapping.
+
 ## A. Windows — controller matrix
 
 For **each** of: Xbox (wired), Xbox (Bluetooth), DualShock 4 / DualSense, Switch Pro:
