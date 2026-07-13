@@ -84,7 +84,7 @@ def _install_strategy(
     runner: Callable[..., subprocess.CompletedProcess[str]],
 ) -> Path | str | InstallInstruction:
     if strategy.strategy == "download":
-        return _install_download(emulator_id, version, strategy, progress, app_dir, opener)
+        return _install_download(emulator_id, version, strategy, progress, app_dir, opener, runner)
     if strategy.strategy == "flatpak":
         command = ["flatpak", "install"]
         if assume_yes:
@@ -106,6 +106,7 @@ def _install_download(
     progress: ProgressCallback | None,
     app_dir: Path,
     opener: Callable[..., object],
+    runner: Callable[..., subprocess.CompletedProcess[str]],
 ) -> Path:
     safe_id = _safe_component(emulator_id, "emulator id")
     safe_version = _safe_component(version, "version")
@@ -142,7 +143,7 @@ def _install_download(
         shutil.rmtree(temporary)
     temporary.mkdir(parents=True)
     try:
-        _extract(artifact, temporary, strategy.archive, strategy.exe)
+        _extract(artifact, temporary, strategy.archive, strategy.exe, runner)
         executable = _resolve_executable(temporary, strategy.exe)
         if strategy.archive.lower() == "appimage":
             executable.chmod(executable.stat().st_mode | 0o111)
@@ -164,12 +165,37 @@ def _content_length(response: object) -> int | None:
         return None
 
 
-def _extract(artifact: Path, destination: Path, archive: str, executable: str) -> None:
+def _extract(
+    artifact: Path,
+    destination: Path,
+    archive: str,
+    executable: str,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> None:
     archive_type = archive.lower()
     if archive_type == "zip":
         with zipfile.ZipFile(artifact) as package:
             _validate_members(destination, (item.filename for item in package.infolist()))
             package.extractall(destination)
+        return
+    if archive_type == "7z":
+        tar = shutil.which("tar")
+        if tar is None:
+            raise InstallError("7z extraction requires bsdtar (tar.exe on Windows)")
+        listing = runner(
+            [tar, "-tf", str(artifact)],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=30,
+        )
+        _validate_members(destination, listing.stdout.splitlines())
+        runner(
+            [tar, "-xf", str(artifact), "-C", str(destination)],
+            check=True,
+            text=True,
+            timeout=120,
+        )
         return
     if archive_type in {"tar", "tar.gz", "tgz", "tar.bz2", "tbz2", "tar.xz", "txz"}:
         with tarfile.open(artifact, "r:*") as package:
@@ -203,6 +229,40 @@ def _resolve_executable(destination: Path, executable: str) -> Path:
     if not matches:
         raise InstallError(f"Installed executable was not found: {executable}")
     raise InstallError(f"Installed executable is ambiguous: {executable}")
+
+
+def uninstall(
+    emulator_id: str,
+    strategy: InstallStrategy,
+    installed_path: Path | str | InstallInstruction,
+    *,
+    app_dir: Path = APP_DIR,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> InstallInstruction | None:
+    """Remove an installed emulator.
+
+    Returns None on success, or an InstallInstruction for privileged removal.
+    Raises InstallError on failure.
+    """
+    if isinstance(installed_path, InstallInstruction):
+        return InstallInstruction(f"sudo apt remove {strategy.package}")
+
+    if isinstance(installed_path, str) or strategy.strategy == "flatpak":
+        flatpak_id = installed_path if isinstance(installed_path, str) else strategy.flatpak_id
+        try:
+            runner(["flatpak", "uninstall", "-y", "--user", flatpak_id], check=True, text=True)
+        except subprocess.CalledProcessError:
+            raise InstallError(f"Failed to uninstall Flatpak app: {flatpak_id}")
+        return None
+
+    if isinstance(installed_path, Path):
+        safe_id = _safe_component(emulator_id, "emulator id")
+        emulator_root = app_dir / "emulators" / safe_id
+        if emulator_root.exists():
+            shutil.rmtree(emulator_root)
+        return None
+
+    raise InstallError(f"Unsupported uninstall target type for {emulator_id}")
 
 
 def _safe_component(value: str, label: str) -> str:
