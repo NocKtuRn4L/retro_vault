@@ -25,6 +25,7 @@ def main(window_mode=None):
     window = MainWindow()
     effective = window_mode if window_mode is not None else window.config_data.get("window_mode", "desktop")
     window.apply_window_mode(effective)
+    window.maybe_prompt_first_run_setup()
 
     sys.exit(app.exec())
 

@@ -1,4 +1,5 @@
 import copy
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,6 +50,7 @@ class LaunchCommandTests(unittest.TestCase):
         self.assertIsNone(cmd)
         self.assertIn("No emulator configured", error)
 
+    @unittest.skipUnless(sys.platform == "win32", "resolves a Windows working directory via host pathlib")
     def test_windows_launch_details_use_emulator_directory(self):
         cmd, error = launch.build_launch_command(self.rom, self.config, platform="win32", validate=False)
 

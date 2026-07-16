@@ -115,6 +115,14 @@ class MainWindow(QMainWindow):
         self._build_controller()
         self._build_launch_coordinator()
 
+    def maybe_prompt_first_run_setup(self):
+        """Open the setup wizard shortly after launch if setup is incomplete.
+
+        Deliberately NOT called from ``__init__``: a constructor must not schedule
+        a modal side effect, or merely building a window (as tests do) would pop
+        the wizard and, under a running event loop, hang. The real GUI entry point
+        (:func:`retrovault.ui.app.main`) calls this after the window is shown.
+        """
         if not self.config_data.get("setup", {}).get("completed", False):
             QTimer.singleShot(250, self.on_setup)
 

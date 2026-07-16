@@ -1,6 +1,7 @@
 import copy
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -53,6 +54,7 @@ class DiscoveryTests(unittest.TestCase):
 
         self.assertEqual(result, DetectResult(True, "binary", "example"))
 
+    @unittest.skipUnless(sys.platform == "win32", "expands %VAR% Windows paths via host os.path")
     def test_expanded_windows_path_precedes_flatpak(self):
         manifest = make_manifest(
             binaries=[],
