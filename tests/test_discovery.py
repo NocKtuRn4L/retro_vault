@@ -1,6 +1,7 @@
 import copy
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -53,6 +54,7 @@ class DiscoveryTests(unittest.TestCase):
 
         self.assertEqual(result, DetectResult(True, "binary", "example"))
 
+    @unittest.skipUnless(sys.platform == "win32", "expands %VAR% Windows paths via host os.path")
     def test_expanded_windows_path_precedes_flatpak(self):
         manifest = make_manifest(
             binaries=[],
@@ -74,7 +76,9 @@ class DiscoveryTests(unittest.TestCase):
         manifest = make_manifest(flatpak_id="org.example.App")
         completed = subprocess.CompletedProcess([], 0)
 
-        with mock.patch("retrovault.providers.discovery.subprocess.run", return_value=completed) as run:
+        with mock.patch("retrovault.providers.discovery.shutil.which", return_value="/usr/bin/flatpak"), mock.patch(
+            "retrovault.providers.discovery.subprocess.run", return_value=completed
+        ) as run:
             result = detect_emulator({}, manifest)
 
         self.assertEqual(result, DetectResult(True, "flatpak", "org.example.App"))
@@ -82,6 +86,7 @@ class DiscoveryTests(unittest.TestCase):
             ["flatpak", "info", "org.example.App"],
             capture_output=True,
             check=False,
+            timeout=5,
         )
 
     def test_discover_returns_typed_missing_result(self):

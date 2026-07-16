@@ -4,6 +4,7 @@
   "website": "https://ares-emu.net",
   "license": "ISC",
   "profiles": [{"systems": ["genesis", "snes"], "args": "\"{rom}\""}],
+  "fullscreen": {"mode": "inherit"},
   "detect": {
     "binaries": ["ares"],
     "windows_paths": ["%LOCALAPPDATA%\\ares\\ares.exe", "C:\\Program Files\\ares\\ares.exe"]

@@ -61,6 +61,26 @@ DEFAULT_CONFIG = {
     },
     "systems": DEFAULT_SYSTEMS,
     "theme": "dark",
+    # Window-mode policy for the RetroVault frontend itself (see
+    # retrovault.ui.main_window.MainWindow.apply_window_mode):
+    #   "desktop"    — normal windowed (dev/PC default)
+    #   "fullscreen" — borderless fullscreen frontend
+    #   "kiosk"      — frameless + fullscreen for boot-to-frontend
+    "window_mode": "desktop",
+    # Global fullscreen preference applied on top of each emulator's manifest policy:
+    #   "emulator"       — use each emulator's own fullscreen policy (arg/config/inherit)
+    #   "prefer"         — prefer fullscreen wherever supported, including "inherit" emulators
+    #   "force_windowed" — never force fullscreen
+    # RetroArch defaults to fullscreen in Raspberry Pi kiosk mode; see
+    # retrovault.providers.manifest.effective_fullscreen for the resolver.
+    "fullscreen_preference": "emulator",
+    "controller": {
+        "enabled": True,
+        "dead_zone": 0.35,        # left-stick dead zone, 0..1
+        "repeat_delay_ms": 400,   # initial delay before a held direction repeats
+        "repeat_rate_ms": 120,    # interval between repeats while held
+        "accept_button": "south",  # "south" or "east" — which face button is Accept
+    },
 }
 
 
@@ -87,6 +107,9 @@ def migrate_config(cfg):
         cfg["emulators"][sid].setdefault("flatpak_id", "")
     cfg["emulator_profiles"] = _deep_merge(EMULATOR_PRESETS, cfg.get("emulator_profiles", {}))
     cfg["setup"] = _deep_merge(DEFAULT_CONFIG["setup"], cfg.get("setup", {}))
+    cfg["controller"] = _deep_merge(DEFAULT_CONFIG["controller"], cfg.get("controller", {}))
+    cfg.setdefault("fullscreen_preference", DEFAULT_CONFIG["fullscreen_preference"])
+    cfg.setdefault("window_mode", DEFAULT_CONFIG["window_mode"])
     return cfg
 
 

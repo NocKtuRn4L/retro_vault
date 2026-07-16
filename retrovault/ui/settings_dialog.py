@@ -27,6 +27,8 @@ from PySide6.QtWidgets import (
 
 from ..core import config as config_mod
 from ..core.paths import CONFIG_FILE
+from ..input.actions import Action
+from .controller_nav import activate_focused, make_focusable, move_focus, switch_tab
 
 
 class PathPickerRow(QWidget):
@@ -62,11 +64,11 @@ class SettingsDialog(QDialog):
         self.system_rows = {}
 
         root = QVBoxLayout(self)
-        tabs = QTabWidget()
-        tabs.addTab(self._build_emulators_tab(), "EMULATORS")
-        tabs.addTab(self._build_rom_dirs_tab(), "ROM DIRS")
-        tabs.addTab(self._build_systems_tab(), "SYSTEMS")
-        root.addWidget(tabs, 1)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._build_emulators_tab(), "EMULATORS")
+        self.tabs.addTab(self._build_rom_dirs_tab(), "ROM DIRS")
+        self.tabs.addTab(self._build_systems_tab(), "SYSTEMS")
+        root.addWidget(self.tabs, 1)
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
@@ -79,9 +81,54 @@ class SettingsDialog(QDialog):
         buttons.addWidget(save)
         root.addLayout(buttons)
 
+        # Controller navigation (PR9): make the key buttons reachable by pad.
+        make_focusable(cancel, save)
+
+    # ── Controller navigation (PR9) ──────────────────────────────────────────
+    def handle_controller_action(self, event) -> bool:
+        """Drive this dialog from a controller :class:`ActionEvent`.
+
+        Returns ``True`` when the action was consumed. See
+        :mod:`retrovault.ui.controller_nav` for the contract.
+        """
+        action = event.action
+        if action in (Action.UP, Action.DOWN):
+            move_focus(self, forward=action is Action.DOWN)
+            return True
+        if action in (Action.LEFT, Action.PREV_SYSTEM):
+            switch_tab(self.tabs, -1)
+            return True
+        if action in (Action.RIGHT, Action.NEXT_SYSTEM):
+            switch_tab(self.tabs, 1)
+            return True
+        if action is Action.ACCEPT:
+            return activate_focused(self)
+        if action is Action.BACK:
+            self.reject()
+            return True
+        # MENU has no meaning inside the dialog.
+        return False
+
+    # Fullscreen preference: combo index <-> stored config value.
+    _FULLSCREEN_OPTIONS = (
+        ("Use emulator preference", "emulator"),
+        ("Prefer fullscreen", "prefer"),
+        ("Force windowed", "force_windowed"),
+    )
+
     def _build_emulators_tab(self):
         page = QWidget()
         outer = QVBoxLayout(page)
+
+        display_group = QGroupBox("Display")
+        display_form = QFormLayout(display_group)
+        self.fullscreen_preference = QComboBox()
+        self.fullscreen_preference.addItems([label for label, _ in self._FULLSCREEN_OPTIONS])
+        current_value = self.config_data.get("fullscreen_preference", "emulator")
+        values = [value for _, value in self._FULLSCREEN_OPTIONS]
+        self.fullscreen_preference.setCurrentIndex(values.index(current_value) if current_value in values else 0)
+        display_form.addRow("Fullscreen", self.fullscreen_preference)
+        outer.addWidget(display_group)
 
         retro_group = QGroupBox("RetroArch")
         retro_form = QFormLayout(retro_group)
@@ -182,6 +229,7 @@ class SettingsDialog(QDialog):
 
     def _save(self):
         updated = config_mod.migrate_config(self.config_data)
+        updated["fullscreen_preference"] = self._FULLSCREEN_OPTIONS[self.fullscreen_preference.currentIndex()][1]
         updated["use_retroarch"] = self.use_retroarch.isChecked()
         updated["retroarch_path"] = self.retroarch_path.text()
         updated["rom_dirs"] = [self.rom_dirs.item(i).text() for i in range(self.rom_dirs.count())]

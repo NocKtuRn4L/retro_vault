@@ -101,6 +101,38 @@ QTableView::item:selected, QTreeView::item:selected {
     color: #0d0d0d;
 }
 
+/* ── Controller-focus styling ────────────────────────────────────────────
+ * Make the element the controller is driving unmistakable on the dark theme:
+ * a bright accent selection plus an accent focus ring on the whole view. */
+
+QTableView::item:selected {
+    background-color: #ff3c3c;
+    color: #0d0d0d;
+}
+
+/* Even when the table loses keyboard focus, keep the current ROM readable
+ * with an accent2 tint rather than a washed-out grey. */
+QTableView::item:selected:!active {
+    background-color: #ff8c00;
+    color: #0d0d0d;
+}
+
+QListWidget#sidebar::item:selected {
+    background-color: #ff3c3c;
+    color: #0d0d0d;
+    border-left: 3px solid #ff8c00;
+}
+
+QListWidget#sidebar::item:selected:!active {
+    background-color: #ff8c00;
+    color: #0d0d0d;
+}
+
+/* Visible focus ring so it is obvious which view holds controller focus. */
+QTableView:focus, QListWidget:focus, QListView:focus, QTreeView:focus {
+    border: 2px solid #ff3c3c;
+}
+
 QHeaderView::section {
     background-color: #1a1a1a;
     color: #888888;

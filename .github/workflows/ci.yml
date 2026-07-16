@@ -29,6 +29,9 @@ jobs:
           sudo apt-get install -y libgl1 libegl1
 
       - name: Install package (dev extras)
+        # Installs pygame-ce (a runtime dependency) so the controller backend
+        # and diagnostic are exercised. No physical controller is required:
+        # controller tests use null/fake backends and skip when appropriate.
         run: python -m pip install -e ".[dev]"
 
       - name: Run tests
@@ -36,6 +39,10 @@ jobs:
 
       - name: Lint with ruff
         run: ruff check .
+
+      - name: Controller diagnostic self-test (no hardware)
+        # Smoke the input pipeline headlessly via the NullBackend self-test.
+        run: python -m retrovault.input.diagnostic --self-test
 
       - name: UI import check
         if: hashFiles('retrovault/ui/app.py') != ''
@@ -45,3 +52,28 @@ jobs:
         run: |
           pip install "PySide6-Essentials>=6.6"
           python -c "import retrovault.ui.app"
+
+  aarch64-wheel-check:
+    # Verify the pygame-ce aarch64 wheel installs and imports on linux/arm64.
+    # GitHub-hosted arm64 runners are not universally available, so we emulate
+    # aarch64 with QEMU via run-on-arch-action. This job is independent of the
+    # test matrix and must never require a physical controller.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pygame-ce aarch64 wheel under QEMU
+        uses: uraimo/run-on-arch-action@v2
+        with:
+          arch: aarch64
+          distro: ubuntu22.04
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          install: |
+            apt-get update -q
+            apt-get install -y python3 python3-pip python3-venv
+          run: |
+            python3 -m venv /tmp/venv
+            . /tmp/venv/bin/activate
+            python -m pip install --upgrade pip
+            python -m pip install "pygame-ce>=2.5"
+            python -c "import pygame; print('pygame-ce aarch64 import OK', pygame.version.ver)"

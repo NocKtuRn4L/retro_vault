@@ -4,6 +4,7 @@
   "website": "https://www.duckstation.org",
   "license": "GPL-3.0-only",
   "profiles": [{"systems": ["psx"], "args": "\"{rom}\""}],
+  "fullscreen": {"mode": "arg", "arg": "-fullscreen"},
   "detect": {
     "binaries": ["duckstation-qt", "duckstation"],
     "windows_paths": ["%LOCALAPPDATA%\\DuckStation\\duckstation-qt-x64-ReleaseLTCG.exe"]

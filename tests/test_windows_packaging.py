@@ -24,10 +24,21 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertIn('"PySide6.QtQml"', spec)
         self.assertIn('"qt6network.dll"', spec)
 
+    def test_pyinstaller_spec_bundles_pygame_and_sdl(self):
+        spec = (WINDOWS_PACKAGING / "retrovault.spec").read_text(encoding="utf-8")
+
+        # SDL2 native libraries ride along inside pygame-ce and must be
+        # collected, or the frozen app crashes with a missing SDL2 DLL.
+        self.assertIn("collect_dynamic_libs", spec)
+        self.assertIn('collect_dynamic_libs("pygame")', spec)
+        self.assertIn('collect_data_files("pygame")', spec)
+        self.assertIn('hiddenimports=["pygame"]', spec)
+
     def test_build_script_supports_clean_and_installer_builds(self):
         script = (WINDOWS_PACKAGING / "build.ps1").read_text(encoding="utf-8")
 
         self.assertIn("[switch]$Clean", script)
+        self.assertIn("Close the packaged RetroVault app before rebuilding", script)
         self.assertIn("[switch]$Installer", script)
         self.assertIn('"-m", "PyInstaller"', script)
         self.assertIn('"setup.iss"', script)

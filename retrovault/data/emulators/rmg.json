@@ -4,6 +4,7 @@
   "website": "https://github.com/Rosalie241/RMG",
   "license": "GPL-3.0-or-later",
   "profiles": [{"systems": ["n64"], "args": "\"{rom}\""}],
+  "fullscreen": {"mode": "inherit"},
   "detect": {
     "binaries": ["RMG", "rmg"],
     "windows_paths": ["%LOCALAPPDATA%\\RMG\\RMG.exe", "C:\\Program Files\\RMG\\RMG.exe"],

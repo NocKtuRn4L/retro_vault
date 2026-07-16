@@ -56,15 +56,16 @@ def _expand_windows_path(value: str) -> str:
 
 
 def _flatpak_installed(flatpak_id: str) -> bool:
-    if not flatpak_id:
+    if not flatpak_id or shutil.which("flatpak") is None:
         return False
     try:
         result = subprocess.run(
             ["flatpak", "info", flatpak_id],
             capture_output=True,
             check=False,
+            timeout=5,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return False
     return result.returncode == 0
 

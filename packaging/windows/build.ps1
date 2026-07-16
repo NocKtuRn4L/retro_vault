@@ -11,6 +11,14 @@ $projectRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
 $specPath = Join-Path $scriptDir "retrovault.spec"
 $distPath = Join-Path $projectRoot "dist"
 $workPath = Join-Path $projectRoot "build\pyinstaller"
+$builtExe = Join-Path $distPath "RetroVault\RetroVault.exe"
+
+$runningBuild = Get-Process "RetroVault" -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -eq $builtExe }
+if ($runningBuild) {
+    $processIds = ($runningBuild.Id -join ", ")
+    throw "Close the packaged RetroVault app before rebuilding (running process: $processIds)."
+}
 
 Push-Location $projectRoot
 try {
