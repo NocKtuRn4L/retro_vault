@@ -37,6 +37,7 @@ from ..input.sdl_backend import SdlBackend
 from .launch_overlay import LaunchCoordinator
 from .library_model import LibraryFilterProxyModel, LibraryModel
 from .main_menu import MainMenuDialog
+from .onscreen_keyboard import OnScreenKeyboard
 from .settings_dialog import SettingsDialog
 from .setup_wizard import SetupWizard
 
@@ -470,12 +471,20 @@ class MainWindow(QMainWindow):
     def _menu_actions(self):
         """The top-bar actions exposed to the controller, as (label, callback)."""
         return [
+            ("Search Games", self.on_search_via_keyboard),
             ("Scan ROMs", self.on_scan_roms),
             ("Add ROM Folder", self.on_add_rom_dir),
             ("Setup Wizard", self.on_setup),
             ("Settings", self.on_settings),
             ("Exit RetroVault", self.close),
         ]
+
+    def on_search_via_keyboard(self):
+        """Text-search the library using the controller-navigable on-screen keyboard."""
+        keyboard = OnScreenKeyboard(self.search_box.text(), self, title="Search Games")
+        if keyboard.exec() == QDialog.DialogCode.Accepted:
+            self.search_box.setText(keyboard.text())  # triggers _on_search_changed
+            self._focus_games_column()
 
     def _open_menu(self):
         """MENU: open the controller-navigable main menu, guarding reentrancy.

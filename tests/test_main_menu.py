@@ -86,7 +86,7 @@ class MainMenuDispatchTests(unittest.TestCase):
             labels = [label for label, _ in window._menu_actions()]
             self.assertEqual(
                 labels,
-                ["Scan ROMs", "Add ROM Folder", "Setup Wizard", "Settings", "Exit RetroVault"],
+                ["Search Games", "Scan ROMs", "Add ROM Folder", "Setup Wizard", "Settings", "Exit RetroVault"],
             )
         finally:
             window.close()
@@ -98,7 +98,7 @@ class MainMenuDispatchTests(unittest.TestCase):
             with mock.patch.object(mw, "MainMenuDialog") as dialog_cls:
                 inst = dialog_cls.return_value
                 inst.exec.return_value = QDialog.DialogCode.Accepted
-                inst.chosen_index = 0  # Scan ROMs
+                inst.chosen_index = 1  # Scan ROMs
                 window._open_menu()
             window.on_scan_roms.assert_called_once()
         finally:
@@ -111,7 +111,7 @@ class MainMenuDispatchTests(unittest.TestCase):
             with mock.patch.object(mw, "MainMenuDialog") as dialog_cls:
                 inst = dialog_cls.return_value
                 inst.exec.return_value = QDialog.DialogCode.Accepted
-                inst.chosen_index = 3  # Settings
+                inst.chosen_index = 4  # Settings
                 window._open_menu()
             window.on_settings.assert_called_once()
         finally:

@@ -271,3 +271,25 @@ QLabel[role="title"] {
 QLabel[role="subtext"] {
     color: #888888;
 }
+
+/* ── On-screen keyboard ──────────────────────────────────────────────── */
+
+QPushButton#oskKey {
+    min-width: 34px;
+    padding: 8px 6px;
+    font-size: 11pt;
+}
+
+QPushButton#oskKey:focus {
+    background-color: #ff3c3c;
+    color: #0d0d0d;
+    border: 2px solid #ff8c00;
+}
+
+QLabel#oskPreview {
+    background-color: #141414;
+    border: 1px solid #2a2a2a;
+    padding: 8px 10px;
+    font-size: 14pt;
+    color: #f0f0f0;
+}
