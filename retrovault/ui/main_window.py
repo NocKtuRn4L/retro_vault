@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 
 from ..core.config import load_config, save_config
 from ..core.launch import launch_rom
-from ..core.library import load_library, save_library, scan_roms
+from ..core.library import load_library, merge_scan, save_library, scan_roms
 from ..input.actions import Action, ActionEvent
 from ..input.backend import Backend, NullBackend
 from ..input.router import ControllerRouter, InputStateMachine
@@ -645,6 +645,9 @@ class MainWindow(QMainWindow):
         self._track_worker(worker)
 
     def _scan_finished(self, library):
+        # Preserve favorites/play-time/artwork/metadata added since the last
+        # scan; scan_roms only rebuilds the disk-derived fields.
+        library = merge_scan(self.library, library)
         save_library(library)
         self._refresh_library(library)
         self.statusBar().showMessage(f"Scan complete: {len(library)} ROMs", 4000)
