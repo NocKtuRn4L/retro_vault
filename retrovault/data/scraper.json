@@ -1,0 +1,25 @@
+{
+  "_comment": "ScreenScraper (screenscraper.fr) backend config for retrovault.providers.scraper. 'platforms' maps each RetroVault system id to a ScreenScraper 'systemeid'. 'media_types' maps a RetroVault media kind to the ScreenScraper media 'type' names to try, in order of preference. IDs below are ScreenScraper's documented system ids.",
+  "provider": "screenscraper",
+  "api": {
+    "base_url": "https://api.screenscraper.fr/api2",
+    "game_info_endpoint": "jeuInfos.php",
+    "softname": "retrovault",
+    "output": "json"
+  },
+  "platforms": {
+    "nes": 3,
+    "snes": 4,
+    "gb": 9,
+    "gbc": 10,
+    "gba": 12,
+    "n64": 14,
+    "psx": 57,
+    "genesis": 1
+  },
+  "media_types": {
+    "boxart": ["box-2D", "box-2D-front"],
+    "logo": ["wheel", "wheel-hd"],
+    "screenshot": ["ss", "sstitle"]
+  }
+}

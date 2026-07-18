@@ -26,6 +26,7 @@ CONFIG_FILE = APP_DIR / "config.json"
 LIBRARY_FILE = APP_DIR / "library.json"
 LOG_FILE = APP_DIR / "retrovault.log"
 TEST_ROM_FILE = APP_DIR / "test_roms.json"
+MEDIA_DIR = APP_DIR / "media"
 
 
 def init_app_dirs():
@@ -35,6 +36,7 @@ def init_app_dirs():
     retrovault.core has no filesystem side effects.
     """
     APP_DIR.mkdir(parents=True, exist_ok=True)
+    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
     try:
         logging.basicConfig(
             filename=LOG_FILE,
