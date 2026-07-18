@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -28,7 +29,25 @@ from PySide6.QtWidgets import (
 from ..core import config as config_mod
 from ..core.paths import CONFIG_FILE
 from ..input.actions import Action
+from ..providers import discovery
 from .controller_nav import activate_focused, make_focusable, move_focus, switch_tab
+
+
+class DiscoveryThread(QThread):
+    """Run emulator discovery off the UI thread (same pattern as WorkerThread)."""
+
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, config_data, parent=None):
+        super().__init__(parent)
+        self.config_data = config_data
+
+    def run(self):
+        try:
+            self.succeeded.emit(discovery.discover_emulators(self.config_data))
+        except Exception as exc:  # Worker failures must return to the GUI thread.
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
 
 
 class PathPickerRow(QWidget):
@@ -62,6 +81,7 @@ class SettingsDialog(QDialog):
         self.resize(900, 620)
         self.config_data = config_mod.migrate_config(config_data)
         self.system_rows = {}
+        self._threads = set()
 
         root = QVBoxLayout(self)
         self.tabs = QTabWidget()
@@ -119,6 +139,17 @@ class SettingsDialog(QDialog):
     def _build_emulators_tab(self):
         page = QWidget()
         outer = QVBoxLayout(page)
+
+        detect_group = QGroupBox("Detection")
+        detect_layout = QHBoxLayout(detect_group)
+        self.redetect_button = QPushButton("RE-DETECT")
+        self.redetect_button.clicked.connect(self._redetect)
+        self.detect_status = QLabel("")
+        self.detect_status.setWordWrap(True)
+        detect_layout.addWidget(self.redetect_button)
+        detect_layout.addWidget(self.detect_status, 1)
+        outer.addWidget(detect_group)
+        make_focusable(self.redetect_button)
 
         display_group = QGroupBox("Display")
         display_form = QFormLayout(display_group)
@@ -221,6 +252,55 @@ class SettingsDialog(QDialog):
     def _apply_profile(self, profile_combo, args_edit):
         profile = self.config_data.get("emulator_profiles", {}).get(profile_combo.currentText(), {})
         args_edit.setText(profile.get("args", "{rom}"))
+
+    # ── Emulator re-detection ────────────────────────────────────────────────
+    def _redetect(self):
+        """Run discovery off the UI thread and apply results to empty slots."""
+        self.redetect_button.setEnabled(False)
+        self.detect_status.setText("Detecting installed emulators...")
+        thread = DiscoveryThread(self.config_data, self)
+        thread.succeeded.connect(self._apply_detection_results)
+        thread.failed.connect(self._detection_failed)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(lambda: self._threads.discard(thread))
+        thread.finished.connect(lambda: self.redetect_button.setEnabled(True))
+        self._threads.add(thread)
+        thread.start()
+
+    def _detection_failed(self, message):
+        self.detect_status.setText(message)
+
+    def _apply_detection_results(self, results):
+        """Fill empty emulator rows from a discovery result mapping."""
+        updated = discovery.apply_detection(self.config_data, results)
+        found = []
+        for sid, widgets in self.system_rows.items():
+            # Don't clobber a path the user just typed but hasn't saved.
+            if widgets["path"].text() or widgets["flatpak_id"].text().strip():
+                continue
+            slot = updated.get("emulators", {}).get(sid, {})
+            detected = slot.get("path") or slot.get("flatpak_id", "")
+            if not detected:
+                continue
+            widgets["path"].edit.setText(slot.get("path", ""))
+            widgets["flatpak_id"].setText(slot.get("flatpak_id", ""))
+            widgets["args"].setText(slot.get("args", "{rom}"))
+            widgets["launch_type"].setCurrentText(slot.get("launch_type", "exe"))
+            profile = slot.get("profile", "custom")
+            if widgets["profile"].findText(profile) < 0:
+                widgets["profile"].addItem(profile)
+            widgets["profile"].setCurrentText(profile)
+            found.append(self.config_data["systems"].get(sid, {}).get("short", sid.upper()))
+        self.config_data = updated
+        self.detect_status.setText(
+            "Detected: " + ", ".join(found) + "." if found else "No new emulators detected."
+        )
+
+    def closeEvent(self, event):
+        for thread in tuple(self._threads):
+            thread.requestInterruption()
+            thread.wait(1000)
+        super().closeEvent(event)
 
     def _add_rom_dir(self):
         picked = QFileDialog.getExistingDirectory(self, "Choose ROM folder", str(Path.home()))
