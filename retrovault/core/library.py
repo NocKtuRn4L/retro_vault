@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from .paths import LIBRARY_FILE
+from .paths import COLLECTIONS_FILE, LIBRARY_FILE
 
 # Fields that ``scan_roms`` derives from disk and fully owns. Everything else on
 # a library entry (favorite, play_seconds, play_count, last_played, media,
@@ -54,6 +54,29 @@ def load_library():
 def save_library(lib):
     with open(LIBRARY_FILE, "w") as f:
         json.dump(lib, f, indent=2)
+
+
+def load_collections():
+    """Load user collections (a list of ``{"name": str, "paths": [str, ...]}``).
+
+    Collections are library data, not settings, so they live in their own
+    ``collections.json`` (see the pinned decision in the implementation plan).
+    Returns an empty list when the file is missing or unreadable.
+    """
+    if COLLECTIONS_FILE.exists():
+        try:
+            with open(COLLECTIONS_FILE) as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                return data
+        except Exception:
+            pass
+    return []
+
+
+def save_collections(collections):
+    with open(COLLECTIONS_FILE, "w") as f:
+        json.dump(collections, f, indent=2)
 
 
 def scan_roms(config):

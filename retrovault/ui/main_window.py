@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -31,7 +32,14 @@ from PySide6.QtWidgets import (
 
 from ..core.config import load_config, save_config
 from ..core.launch import launch_rom
-from ..core.library import load_library, merge_scan, save_library, scan_roms
+from ..core.library import (
+    load_collections,
+    load_library,
+    merge_scan,
+    save_collections,
+    save_library,
+    scan_roms,
+)
 from ..input.actions import Action, ActionEvent
 from ..input.backend import Backend, NullBackend
 from ..input.router import ControllerRouter, InputStateMachine
@@ -508,6 +516,7 @@ class MainWindow(QMainWindow):
             ("Search Games", self.on_search_via_keyboard),
             ("Scan ROMs", self.on_scan_roms),
             ("Add ROM Folder", self.on_add_rom_dir),
+            ("Toggle Favorite (selected game)", self._toggle_favorite_selected),
             ("Setup Wizard", self.on_setup),
             ("Settings", self.on_settings),
             ("Exit RetroVault", self.close),
@@ -561,17 +570,49 @@ class MainWindow(QMainWindow):
         self._refresh_empty_state()
         self._select_first_visible_row()
 
+    def _get_collections(self):
+        """Return the user's collections list, loading it from disk once."""
+        if getattr(self, "collections", None) is None:
+            self.collections = load_collections()
+        return self.collections
+
     def _refresh_sidebar(self):
         selected = self.sidebar.currentItem().data(Qt.ItemDataRole.UserRole) if self.sidebar.currentItem() else ""
         counts = {}
         for rom in self.library:
             counts[rom.get("system", "")] = counts.get(rom.get("system", ""), 0) + 1
+        favorite_count = sum(1 for rom in self.library if rom.get("favorite"))
+        collections = self._get_collections()
+        # Keep the proxy's collection membership in sync with the sidebar.
+        self.proxy.set_collections(collections)
+
         self.sidebar.blockSignals(True)
         self.sidebar.clear()
+
+        # Virtual views above the systems list: Favorites, Recently Played, and
+        # one entry per collection. Each carries its sentinel filter string as
+        # UserRole data, so the existing _on_sidebar_changed path just works.
+        fav_item = QListWidgetItem(f"★ Favorites ({favorite_count})")
+        fav_item.setData(Qt.ItemDataRole.UserRole, "__favorites__")
+        self.sidebar.addItem(fav_item)
+
+        recent_item = QListWidgetItem("Recently Played")
+        recent_item.setData(Qt.ItemDataRole.UserRole, "__recent__")
+        self.sidebar.addItem(recent_item)
+
+        for coll in collections:
+            name = coll.get("name", "")
+            if not name:
+                continue
+            item = QListWidgetItem(f"{name} ({len(coll.get('paths', []) or [])})")
+            item.setData(Qt.ItemDataRole.UserRole, f"collection:{name}")
+            self.sidebar.addItem(item)
+
         all_item = QListWidgetItem(f"ALL GAMES ({len(self.library)})")
         all_item.setData(Qt.ItemDataRole.UserRole, "")
         self.sidebar.addItem(all_item)
-        selected_row = 0
+        selected_row = self.sidebar.count() - 1  # default: ALL GAMES
+
         for sid, sdef in self.config_data.get("systems", {}).items():
             count = counts.get(sid, 0)
             if not count:
@@ -579,8 +620,13 @@ class MainWindow(QMainWindow):
             item = QListWidgetItem(f"{sdef.get('short', sid.upper())} ({count})")
             item.setData(Qt.ItemDataRole.UserRole, sid)
             self.sidebar.addItem(item)
-            if sid == selected:
-                selected_row = self.sidebar.count() - 1
+
+        # Restore the previously selected filter (system id or sentinel) by key.
+        for row in range(self.sidebar.count()):
+            if self.sidebar.item(row).data(Qt.ItemDataRole.UserRole) == selected:
+                selected_row = row
+                break
+
         self.sidebar.setCurrentRow(selected_row)
         self.sidebar.blockSignals(False)
         self.proxy.set_system_filter(self.sidebar.currentItem().data(Qt.ItemDataRole.UserRole))
@@ -616,8 +662,89 @@ class MainWindow(QMainWindow):
         menu.addAction(launch_action)
         menu.addAction(location_action)
         menu.addSeparator()
+
+        fav_label = "Remove from favorites" if rom.get("favorite") else "Add to favorites"
+        fav_action = QAction(fav_label, self)
+        fav_action.triggered.connect(lambda: self._toggle_favorite(rom))
+        menu.addAction(fav_action)
+
+        collections = self._get_collections()
+        coll_menu = menu.addMenu("Add to collection")
+        new_action = QAction("New collection...", self)
+        new_action.triggered.connect(lambda: self._add_to_new_collection(rom))
+        coll_menu.addAction(new_action)
+        if collections:
+            coll_menu.addSeparator()
+        path = rom.get("path")
+        for coll in collections:
+            name = coll.get("name", "")
+            if not name:
+                continue
+            member = path in (coll.get("paths", []) or [])
+            act = QAction(("✓ " if member else "") + name, self)
+            act.triggered.connect(lambda _checked=False, n=name: self._toggle_collection_membership(rom, n))
+            coll_menu.addAction(act)
+
+        menu.addSeparator()
         menu.addAction(remove_action)
         menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _toggle_favorite(self, rom):
+        """Flip a game's favorite flag, persist the library, and refresh views."""
+        rom["favorite"] = not rom.get("favorite")
+        save_library(self.library)
+        state = "added to" if rom["favorite"] else "removed from"
+        self.statusBar().showMessage(f"{rom.get('name', 'Game')} {state} favorites", 3000)
+        self._refresh_sidebar()
+
+    def _toggle_favorite_selected(self):
+        """MENU-reachable favorite toggle for the currently selected game."""
+        rom = self._selected_rom()
+        if not rom:
+            self.statusBar().showMessage("No ROM selected", 3000)
+            return
+        self._toggle_favorite(rom)
+
+    def _toggle_collection_membership(self, rom, name):
+        """Add/remove a game's path in the named collection and persist it."""
+        collections = self._get_collections()
+        path = rom.get("path")
+        for coll in collections:
+            if coll.get("name") == name:
+                paths = coll.setdefault("paths", [])
+                if path in paths:
+                    paths.remove(path)
+                    msg = f"Removed from {name}"
+                else:
+                    paths.append(path)
+                    msg = f"Added to {name}"
+                break
+        else:
+            return
+        save_collections(collections)
+        self.proxy.set_collections(collections)
+        self.statusBar().showMessage(msg, 3000)
+        self._refresh_sidebar()
+
+    def _add_to_new_collection(self, rom):
+        """Prompt for a new collection name and add the game to it."""
+        name, ok = QInputDialog.getText(self, "New Collection", "Collection name:")
+        name = name.strip() if ok else ""
+        if not name:
+            return
+        collections = self._get_collections()
+        for coll in collections:
+            if coll.get("name") == name:
+                paths = coll.setdefault("paths", [])
+                if rom.get("path") not in paths:
+                    paths.append(rom.get("path"))
+                break
+        else:
+            collections.append({"name": name, "paths": [rom.get("path")]})
+        save_collections(collections)
+        self.proxy.set_collections(collections)
+        self.statusBar().showMessage(f"Added to {name}", 3000)
+        self._refresh_sidebar()
 
     def _open_location(self, rom):
         path = Path(rom.get("path", ""))

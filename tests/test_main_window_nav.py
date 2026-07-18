@@ -87,11 +87,13 @@ class MainWindowNavTests(unittest.TestCase):
         window = self._make_window()
         try:
             self._feed(window, Action.LEFT)  # enter systems column
-            self.assertEqual(window.sidebar.currentRow(), 0)
+            # Rows 0/1 are the virtual ★ Favorites / Recently Played entries;
+            # ALL GAMES (the default selection) is row 2.
+            self.assertEqual(window.sidebar.currentRow(), 2)
             self._feed(window, Action.DOWN)
-            self.assertEqual(window.sidebar.currentRow(), 1)
+            self.assertEqual(window.sidebar.currentRow(), 3)
             self._feed(window, Action.UP)
-            self.assertEqual(window.sidebar.currentRow(), 0)
+            self.assertEqual(window.sidebar.currentRow(), 2)
         finally:
             window.close()
 
@@ -121,13 +123,14 @@ class MainWindowNavTests(unittest.TestCase):
     def test_next_prev_system_changes_sidebar(self):
         window = self._make_window()
         try:
-            self.assertEqual(window.sidebar.currentRow(), 0)
+            # ALL GAMES (default) is row 2, below the virtual Favorites/Recent entries.
+            self.assertEqual(window.sidebar.currentRow(), 2)
             self._feed(window, Action.NEXT_SYSTEM)
-            self.assertEqual(window.sidebar.currentRow(), 1)
+            self.assertEqual(window.sidebar.currentRow(), 3)
             # Changing the filter should auto-select the first visible ROM.
             self.assertEqual(window._selected_proxy_row(), 0)
             self._feed(window, Action.PREV_SYSTEM)
-            self.assertEqual(window.sidebar.currentRow(), 0)
+            self.assertEqual(window.sidebar.currentRow(), 2)
         finally:
             window.close()
 
