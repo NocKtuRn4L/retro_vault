@@ -24,6 +24,7 @@ def resolve_app_dir(home=None, environ=None):
 APP_DIR = resolve_app_dir()
 CONFIG_FILE = APP_DIR / "config.json"
 LIBRARY_FILE = APP_DIR / "library.json"
+COLLECTIONS_FILE = APP_DIR / "collections.json"
 LOG_FILE = APP_DIR / "retrovault.log"
 TEST_ROM_FILE = APP_DIR / "test_roms.json"
 MEDIA_DIR = APP_DIR / "media"
