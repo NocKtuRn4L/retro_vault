@@ -7,6 +7,7 @@ try:
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QWidget
 
+    from retrovault.ui import launch_overlay as launch_overlay_module
     from retrovault.ui.launch_overlay import (
         LAUNCHING_CAPTION,
         RETURNING_CAPTION,
@@ -122,6 +123,8 @@ class LaunchCoordinatorTests(unittest.TestCase):
         coord.input_disabled.connect(lambda flag: events["input_disabled"].append(flag))
         coord.finished.connect(lambda: events.__setitem__("finished", events["finished"] + 1))
         coord.failed.connect(lambda msg: events["failed"].append(msg))
+        events["session_finished"] = []
+        coord.session_finished.connect(lambda info: events["session_finished"].append(info))
         return host, session, coord, events
 
     def test_launch_shows_overlay_disables_input_saves_view(self):
@@ -164,6 +167,40 @@ class LaunchCoordinatorTests(unittest.TestCase):
             self.assertEqual(events["restore_view"], 1)
             self.assertEqual(events["input_disabled"], [True, False])
             self.assertEqual(events["finished"], 1)
+        finally:
+            host.close()
+
+    def test_session_finished_reports_rom_path_and_elapsed(self):
+        host, session, coord, events = self._make_coordinator()
+        host.show()
+        # Feed a controlled monotonic delta: launch@100.0, exit@145.0 -> 45.0s.
+        original = launch_overlay_module.time.monotonic
+        ticks = iter([100.0, 145.0])
+        launch_overlay_module.time.monotonic = lambda: next(ticks)
+        try:
+            coord.launch({"path": "/roms/game.nes"}, {})
+            session.started.emit()
+            session.exited.emit(0)
+            QTest.qWait(700)
+            QApplication.processEvents()
+            self.assertEqual(events["finished"], 1)
+            self.assertEqual(len(events["session_finished"]), 1)
+            info = events["session_finished"][0]
+            self.assertEqual(info["rom_path"], "/roms/game.nes")
+            self.assertAlmostEqual(info["elapsed_seconds"], 45.0, places=3)
+        finally:
+            launch_overlay_module.time.monotonic = original
+            host.close()
+
+    def test_failed_launch_emits_no_session_finished(self):
+        host, session, coord, events = self._make_coordinator()
+        host.show()
+        try:
+            coord.launch({"path": "/roms/game.nes"}, {})
+            session.failed.emit("boom")
+            QTest.qWait(50)
+            QApplication.processEvents()
+            self.assertEqual(events["session_finished"], [])
         finally:
             host.close()
 

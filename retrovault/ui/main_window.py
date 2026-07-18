@@ -3,6 +3,7 @@
 import logging
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from PySide6.QtCore import QItemSelectionModel, Qt, QThread, QTimer, QUrl, Signal
@@ -36,7 +37,7 @@ from ..input.backend import Backend, NullBackend
 from ..input.router import ControllerRouter, InputStateMachine
 from ..input.sdl_backend import SdlBackend
 from .detail_panel import DetailPanel
-from .launch_overlay import LaunchCoordinator
+from .launch_overlay import MIN_PLAY_SECONDS, LaunchCoordinator
 from .library_model import LibraryFilterProxyModel, LibraryModel
 from .main_menu import MainMenuDialog
 from .onscreen_keyboard import OnScreenKeyboard
@@ -147,6 +148,7 @@ class MainWindow(QMainWindow):
             )
             self.launch_coordinator.input_disabled.connect(self._on_launch_input_disabled)
             self.launch_coordinator.finished.connect(self._on_launch_session_finished)
+            self.launch_coordinator.session_finished.connect(self._on_play_session_finished)
             self.launch_coordinator.failed.connect(self._on_launch_session_failed)
         except Exception as exc:  # pragma: no cover - defensive; never crash UI
             logger.warning("Launch coordinator disabled: %s: %s", type(exc).__name__, exc)
@@ -765,6 +767,37 @@ class MainWindow(QMainWindow):
         self.table.setFocus()
         self._play_return_cue()
         self._resume_controller_after_debounce()
+
+    def _on_play_session_finished(self, info):
+        """Record play time for a completed emulator session.
+
+        ``info`` is ``{"rom_path": <str>, "elapsed_seconds": <float>}`` from the
+        coordinator's ``session_finished`` signal. Accumulates ``play_seconds``,
+        bumps ``play_count``, and stamps ``last_played`` (ISO-8601, UTC) on the
+        matching library entry, then persists and refreshes just that row.
+        Implausibly short sessions (``< MIN_PLAY_SECONDS``) are discarded — they
+        are failed launches or the un-waitable ShellExecute path.
+        """
+        if not isinstance(info, dict):
+            return
+        elapsed = info.get("elapsed_seconds")
+        rom_path = info.get("rom_path")
+        if elapsed is None or rom_path is None:
+            return
+        if elapsed < MIN_PLAY_SECONDS:
+            return
+        for row, entry in enumerate(self.library):
+            if entry.get("path") != rom_path:
+                continue
+            entry["play_seconds"] = int(entry.get("play_seconds", 0)) + int(elapsed)
+            entry["play_count"] = int(entry.get("play_count", 0)) + 1
+            entry["last_played"] = datetime.now(timezone.utc).isoformat()
+            save_library(self.library)
+            # Refresh only the affected source row so the view reflects the update.
+            top_left = self.model.index(row, 0)
+            bottom_right = self.model.index(row, self.model.columnCount() - 1)
+            self.model.dataChanged.emit(top_left, bottom_right)
+            break
 
     def _on_launch_session_failed(self, message):
         """Launch could not start: show the dialog (coordinator never does) + recover."""

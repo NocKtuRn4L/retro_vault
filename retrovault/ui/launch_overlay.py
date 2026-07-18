@@ -19,6 +19,8 @@ handled elsewhere. Here we only manage the in-window black overlay and the
 transition timing.
 """
 
+import time
+
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
@@ -30,6 +32,11 @@ RETURNING_CAPTION = "RETURNING…"
 
 # Milliseconds the "returning" caption lingers before the overlay hides.
 RETURN_GRACE_MS = 400
+
+# Sessions shorter than this are treated as failed launches (e.g. the
+# un-waitable win32 ShellExecute path that emits ``exited(0)`` immediately)
+# and are discarded rather than recorded as play time.
+MIN_PLAY_SECONDS = 5.0
 
 
 class LaunchOverlay(QWidget):
@@ -149,6 +156,11 @@ class LaunchCoordinator(QObject):
             controller polling and disable widgets), ``False`` once the emulator
             has exited or the launch failed.
         finished(): emitted after the emulator exits and the view is restored.
+        session_finished(object): emitted alongside ``finished`` with a dict
+            ``{"rom_path": <str>, "elapsed_seconds": <float>}`` carrying the
+            wall-clock time the emulator ran. Sub-threshold sessions (see
+            :data:`MIN_PLAY_SECONDS`) are still emitted with their (small)
+            elapsed; the host decides whether to record them.
         failed(str): emitted with an error message when the launch could not
             start. The host connects this to show a ``QMessageBox`` — the
             coordinator never pops a dialog itself.
@@ -156,6 +168,7 @@ class LaunchCoordinator(QObject):
 
     input_disabled = Signal(bool)
     finished = Signal()
+    session_finished = Signal(object)
     failed = Signal(str)
 
     def __init__(
@@ -174,6 +187,10 @@ class LaunchCoordinator(QObject):
         self._save_view = save_view or (lambda: None)
         self._restore_view = restore_view or (lambda: None)
         self._session = None
+        # Play-time tracking state for the in-flight launch.
+        self._launch_started_at = None
+        self._launch_rom_path = None
+        self._elapsed_seconds = None
 
     @property
     def overlay(self):
@@ -191,6 +208,10 @@ class LaunchCoordinator(QObject):
         """Begin launching ``rom`` with ``config``, covering the UI in black."""
         # Snapshot the view before anything changes, then cover + disable input.
         self._save_view()
+        # Start the play-time clock and remember which ROM this launch is for.
+        self._launch_started_at = time.monotonic()
+        self._launch_rom_path = rom.get("path") if hasattr(rom, "get") else None
+        self._elapsed_seconds = None
         self._overlay.show_launching()
         self.input_disabled.emit(True)
 
@@ -213,6 +234,9 @@ class LaunchCoordinator(QObject):
         self._overlay.hide()
 
     def _on_exited(self, _code):
+        # Capture play time at the true exit point (excludes the return grace).
+        if self._launch_started_at is not None:
+            self._elapsed_seconds = time.monotonic() - self._launch_started_at
         # Briefly show the "returning" caption, then hide, restore, re-enable.
         self._overlay.show_returning()
         QTimer.singleShot(RETURN_GRACE_MS, self._finish_return)
@@ -222,11 +246,24 @@ class LaunchCoordinator(QObject):
         self._restore_view()
         self.input_disabled.emit(False)
         self._session = None
+        rom_path = self._launch_rom_path
+        elapsed = self._elapsed_seconds
+        self._launch_started_at = None
+        self._launch_rom_path = None
+        self._elapsed_seconds = None
         self.finished.emit()
+        if elapsed is not None:
+            self.session_finished.emit(
+                {"rom_path": rom_path, "elapsed_seconds": float(elapsed)}
+            )
 
     def _on_failed(self, message):
         # Keep the app covering the desktop; just drop our overlay and re-enable.
         self._overlay.hide()
         self.input_disabled.emit(False)
         self._session = None
+        # A launch that never started records no play time.
+        self._launch_started_at = None
+        self._launch_rom_path = None
+        self._elapsed_seconds = None
         self.failed.emit(message)
