@@ -44,13 +44,14 @@ For **each** of: Xbox (wired), Xbox (Bluetooth), DualShock 4 / DualSense, Switch
 - [ ] Left stick navigates with dead-zone applied — no drift when released; hysteresis prevents chatter at the threshold.
 - [ ] Held direction: single step, then auto-repeat after the delay at a steady rate; release stops immediately.
 - [ ] Left/Back enter the systems column, Right enters the games column, Up/Down move within the active column, Accept drills systems→games / launches in games.
-- [ ] Start opens the on-screen **main menu**; Scan ROMs, Setup Wizard, Settings, and Exit are all reachable and activatable with only the controller.
+- [ ] Start opens the on-screen **main menu**; Search Games, Scan ROMs, Setup Wizard, Settings, and Exit are all reachable and activatable with only the controller.
+- [ ] Menu → **Search Games** opens the on-screen keyboard: D-pad moves keys, Accept types, Back/shoulder = backspace, shoulder = space, Start = done; the entered text filters the library.
 - [ ] Accept launches the selected ROM.
 
-> Known gamepad-only gaps (need an on-screen keyboard / are inherently
-> mouse-driven): the **search** field (text entry) and the **folder picker**
-> used by "Add ROM Folder" / Settings → ROM Dirs. Pre-seed ROM dirs for a pure
-> kiosk setup; emulator provisioning itself is controller-navigable in Setup.
+> Remaining gamepad-only gap: the **folder picker** used by "Add ROM Folder" /
+> Settings → ROM Dirs is the OS-native file dialog (mouse/keyboard). Pre-seed ROM
+> dirs for a pure kiosk setup; emulator provisioning itself is controller-
+> navigable in Setup. (Text search is now covered by the on-screen keyboard.)
 - [ ] Measure **input-to-action latency < 20 ms** (visually acceptable; use high-speed capture if available).
 - [ ] Idle CPU with controller connected stays negligible.
 
