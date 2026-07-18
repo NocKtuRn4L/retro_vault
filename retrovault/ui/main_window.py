@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QSplitter,
     QTableView,
     QVBoxLayout,
     QWidget,
@@ -34,6 +35,7 @@ from ..input.actions import Action, ActionEvent
 from ..input.backend import Backend, NullBackend
 from ..input.router import ControllerRouter, InputStateMachine
 from ..input.sdl_backend import SdlBackend
+from .detail_panel import DetailPanel
 from .launch_overlay import LaunchCoordinator
 from .library_model import LibraryFilterProxyModel, LibraryModel
 from .main_menu import MainMenuDialog
@@ -269,8 +271,38 @@ class MainWindow(QMainWindow):
         self.placeholder_label.setProperty("role", "subtext")
         self.placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         content_layout.addWidget(self.placeholder_label, 1)
-        body_layout.addWidget(content, 1)
+
+        # Game detail panel (PR #2b): the games table and the collapsible detail
+        # panel share a horizontal splitter so the user can resize/hide the panel.
+        self.detail_panel = DetailPanel(self.config_data.get("systems", {}), self)
+        self.body_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.body_splitter.addWidget(content)
+        self.body_splitter.addWidget(self.detail_panel)
+        self.body_splitter.setStretchFactor(0, 1)
+        self.body_splitter.setStretchFactor(1, 0)
+        self.body_splitter.setCollapsible(0, False)
+        self.body_splitter.setCollapsible(1, True)
+        self.body_splitter.setSizes([760, 300])
+        body_layout.addWidget(self.body_splitter, 1)
+
+        # Update the panel whenever the selected ROM changes.
+        self.table.selectionModel().currentRowChanged.connect(
+            lambda *_: self._update_detail_panel()
+        )
+        self._update_detail_panel()
+
+        # Simple show/hide toggle for the detail panel (Ctrl+D).
+        detail_toggle = QShortcut(QKeySequence("Ctrl+D"), self)
+        detail_toggle.activated.connect(
+            lambda: self.detail_panel.setVisible(not self.detail_panel.isVisible())
+        )
+
         return body_layout
+
+    def _update_detail_panel(self):
+        """Refresh the detail panel for the currently selected ROM (PR #2b)."""
+        if hasattr(self, "detail_panel"):
+            self.detail_panel.update_for(self._selected_rom())
 
     def _build_status_bar(self):
         self.statusBar().showMessage("Welcome to RetroVault")
