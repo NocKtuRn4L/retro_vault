@@ -81,6 +81,16 @@ DEFAULT_CONFIG = {
         "repeat_rate_ms": 120,    # interval between repeats while held
         "accept_button": "south",  # "south" or "east" — which face button is Accept
     },
+    # Metadata + artwork scraping (see retrovault.providers.scraper). Credentials
+    # are user-supplied — ScreenScraper requires a (free) account. Disabled by
+    # default so a fresh install never touches the network unprompted.
+    "scraper": {
+        "provider": "screenscraper",
+        "username": "",
+        "password": "",
+        "region": "us",
+        "enabled": False,
+    },
 }
 
 
@@ -108,6 +118,7 @@ def migrate_config(cfg):
     cfg["emulator_profiles"] = _deep_merge(EMULATOR_PRESETS, cfg.get("emulator_profiles", {}))
     cfg["setup"] = _deep_merge(DEFAULT_CONFIG["setup"], cfg.get("setup", {}))
     cfg["controller"] = _deep_merge(DEFAULT_CONFIG["controller"], cfg.get("controller", {}))
+    cfg["scraper"] = _deep_merge(DEFAULT_CONFIG["scraper"], cfg.get("scraper", {}))
     cfg.setdefault("fullscreen_preference", DEFAULT_CONFIG["fullscreen_preference"])
     cfg.setdefault("window_mode", DEFAULT_CONFIG["window_mode"])
     return cfg
