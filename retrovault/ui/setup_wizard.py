@@ -77,8 +77,15 @@ class SetupWizard(QDialog):
             banner_layout.addWidget(use_all)
             root.addWidget(banner)
 
+        root.addWidget(
+            QLabel(
+                "Step 1: detect installed emulators. Anything not found can be installed "
+                "or pointed at below."
+            )
+        )
         actions = QHBoxLayout()
-        detect_all = QPushButton("DETECT ALL")
+        detect_all = QPushButton("DETECT INSTALLED EMULATORS")
+        detect_all.setProperty("accent", "true")
         detect_all.clicked.connect(self._detect_all)
         install_all = QPushButton("INSTALL RECOMMENDED SET")
         install_all.setProperty("accent", "true")
@@ -88,6 +95,14 @@ class SetupWizard(QDialog):
         actions.addStretch(1)
         root.addLayout(actions)
         make_focusable(detect_all, install_all)
+
+        # Found/not-found summary from the detection step (populated by
+        # _detection_complete). Hidden until a detection run has happened.
+        self.detect_summary = QLabel()
+        self.detect_summary.setWordWrap(True)
+        self.detect_summary.setProperty("role", "detect-summary")
+        self.detect_summary.setVisible(False)
+        root.addWidget(self.detect_summary)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -295,19 +310,38 @@ class SetupWizard(QDialog):
 
     def _detection_complete(self, results):
         self.config_data = discovery.apply_detection(self.config_data, results, self.registry)
+        found, missing = [], []
         for sid, row in self.rows.items():
             manifest = row["manifest"]
             result = results.get(manifest.id) if manifest else None
+            label = self.config_data["systems"].get(sid, {}).get("short", sid.upper())
             if result and result.found:
                 self._set_state(sid, "FOUND")
                 slot = self.config_data["emulators"][sid]
                 row["path"].setText(slot.get("path") or slot.get("flatpak_id", ""))
+                found.append(label)
             elif config_mod.is_emulator_configured(self.config_data, sid):
                 self._set_state(sid, "READY")
+                if result is not None:
+                    found.append(label)
             elif result is not None:
                 self._set_state(sid, "NOT FOUND")
+                missing.append(label)
             else:
                 self._set_state(sid, "NEEDED")
+        self._update_detect_summary(found, missing)
+
+    def _update_detect_summary(self, found, missing):
+        """Summarise the last detection run in the header for the user."""
+        if not found and not missing:
+            return
+        parts = [f"Detected {len(found)} of {len(found) + len(missing)} systems."]
+        if found:
+            parts.append("Found: " + ", ".join(found) + ".")
+        if missing:
+            parts.append("Not found (install or browse below): " + ", ".join(missing) + ".")
+        self.detect_summary.setText(" ".join(parts))
+        self.detect_summary.setVisible(True)
 
     def _toggle_install(self, sid):
         if "installed_path" in self.rows[sid]:

@@ -85,6 +85,29 @@ class SetupWizardProvisioningTests(unittest.TestCase):
         self.assertEqual(wizard.rows["nes"]["status"].text(), "FOUND")
         self.assertEqual(wizard.config_data["emulators"]["nes"]["path"], "C:/Mesen/Mesen.exe")
 
+    def test_detection_populates_slots_and_marks_configured(self):
+        from retrovault.core.config import is_emulator_configured
+
+        wizard = self.make_wizard()
+        self.assertFalse(is_emulator_configured(wizard.config_data, "nes"))
+
+        wizard._detection_complete({"mesen-ce": DetectResult(True, "exe", "C:/Mesen/Mesen.exe")})
+
+        slot = wizard.config_data["emulators"]["nes"]
+        self.assertEqual(slot["path"], "C:/Mesen/Mesen.exe")
+        self.assertEqual(slot["launch_type"], "exe")
+        self.assertTrue(is_emulator_configured(wizard.config_data, "nes"))
+
+    def test_detection_summary_reports_found_and_missing(self):
+        wizard = self.make_wizard()
+        wizard._detection_complete(
+            {"mesen-ce": DetectResult(True, "exe", "C:/Mesen/Mesen.exe"), "mgba": DetectResult(False)}
+        )
+        self.assertFalse(wizard.detect_summary.isHidden())
+        text = wizard.detect_summary.text()
+        self.assertIn("Found:", text)
+        self.assertIn("Not found", text)
+
     @mock.patch("retrovault.ui.setup_wizard.config_mod.save_config")
     @mock.patch("retrovault.ui.setup_wizard.audit_mod.load_test_rom_manifest", return_value={})
     def test_linux_retroarch_install_wires_flatpak_and_cores(self, _manifest, _save):
