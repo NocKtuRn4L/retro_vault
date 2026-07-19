@@ -435,9 +435,15 @@ class MainWindow(QMainWindow):
             else:
                 self.on_launch_selected()
         elif action is Action.MENU:
-            # The Settings dialog currently holds emulator configuration; a
-            # dedicated Emulator Manager may replace this call in a later PR.
-            self._open_menu()
+            # Defer the menu to the next event-loop turn rather than opening it
+            # inline. This slot runs from the controller router's QTimer tick;
+            # calling _open_menu() here would enter the dialog's blocking exec()
+            # while still inside that tick, and Qt will not re-enter the timer's
+            # timeout slot while it's on the stack — so the backend would never
+            # be polled again and the controller could not navigate the menu it
+            # just opened. singleShot(0) lets this tick return first so polling
+            # continues inside the dialog's nested event loop.
+            QTimer.singleShot(0, self._open_menu)
 
     def _nav_move(self, delta):
         """Move selection by ``delta`` within the active column (systems/games)."""
