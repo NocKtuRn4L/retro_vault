@@ -395,3 +395,64 @@ F first (it restructures `_build_body`).
 | 4 | Favorites / collections | M | PR 0 |
 | 5 | Play-time tracking | S | PR 0, LaunchCoordinator |
 | 7 | RetroAchievements | M–L | config, #2b panel |
+| 8a | RetroArch default for controller mode | S | launch/config (done) |
+| 8b | Auto-provision RetroArch + cores | L | installer, pinned artifacts |
+
+---
+
+## 8. Seamless controller support — RetroArch-first
+
+**Goal:** the controller works in emulators without the user hand-mapping each one.
+
+**Decision (validated on real hardware):** make **RetroArch the default backbone for
+controller-first play**, because its centralized controller autoconfig is the reliable,
+low-maintenance path. Keep the curated standalones as the opt-out.
+
+### What the live testing established
+
+- **SDL env injection (`SDL_GAMECONTROLLERCONFIG`) does NOT work for standalone emulators.**
+  mGBA (and its class) bind by *raw SDL joystick button index* in their own config, not via
+  SDL's GameController mapping, so the env var is ignored. This approach was prototyped and
+  **parked** (closed PR).
+- **Writing the emulator's own config DOES work** (proven: writing `keyA=1, keyB=0, keyUp=11…`
+  into mGBA's `config.ini` from the pad's SDL mapping made Pokémon Crystal fully playable). But
+  it's a *per-emulator, format-specific, version-fragile* treadmill (each of mGBA/DuckStation/
+  RMG/Snes9x has its own format; emulators rewrite their config on exit). Kept as an optional
+  **Lever 3** convenience, not the strategy.
+- **RetroArch autoconfig** covers all systems with one setup and near-zero maintenance — the
+  right default.
+
+### 8a — RetroArch as the default for controller mode ✅ (this PR)
+
+**Done.** `core/launch.py:use_retroarch_for(config, system_key)` centralizes the backend
+decision: the explicit `use_retroarch` toggle keeps its meaning; otherwise
+`controller.prefer_retroarch` (new config key, default on) routes through RetroArch **only when
+a real RetroArch binary and a core for the system exist**, falling back to the standalone
+otherwise. `validate_launch`/`build_launch_command` both route through it. Inert until RetroArch
+is set up, so a fresh install keeps its standalones. Tests in `tests/test_retroarch_preference.py`.
+
+### 8b — Auto-provision RetroArch + cores (the remaining work)
+
+**Why it's a separate PR:** it needs *verified external artifacts* — a pinned RetroArch Windows
+build (url + sha256) and libretro **core** downloads — which must be fetched and checksummed
+deliberately, not fabricated.
+
+**Files to touch**
+- `data/emulators/retroarch.json` — the Windows `install` strategy is currently `"unavailable"`;
+  add a pinned `download` strategy (url/sha256/archive/exe) like the other emulators.
+- `providers/installer.py` / a new `providers/cores.py` — **core provisioning is net-new**: no
+  libretro-core download logic exists today. Download cores from the libretro buildbot
+  (`https://buildbot.libretro.com/nightly/<platform>/latest/<core>.dll.zip`) into a managed
+  cores dir, verify, and point RetroArch's `core_path` at it (write RetroArch's `retroarch.cfg`).
+  The system→core map already exists in `retroarch.json` and `DEFAULT_CONFIG["retroarch_cores"]`.
+- `ui/setup_wizard.py` — offer "install RetroArch for seamless controllers" in Easy Mode; on
+  success set `retroarch_path` + `use_retroarch`/leave `prefer_retroarch` on. Reuse the existing
+  `discover_emulators` detection to skip install when RetroArch is already present.
+
+**Notes**
+- Keep N64 flexible: `mupen64plus_next` is the one core clearly behind its standalone (RMG), so
+  allow the standalone to remain for n64.
+- All downloads behind the existing installer's checksum discipline; no live network in CI
+  (fixture/opener injection like `providers/manifest.py`).
+
+**Effort:** L. **Depends on:** pinned artifacts + a core downloader.

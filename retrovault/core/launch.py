@@ -68,6 +68,33 @@ def get_emulator_config(system_key, config):
     return emu
 
 
+def use_retroarch_for(config, system_key):
+    """Decide whether to launch ``system_key`` through RetroArch.
+
+    RetroArch is the reliable path for seamless controller support (its
+    centralized autoconfig maps common pads with no per-emulator setup), so it
+    becomes the default for controller-first play — but only when it is actually
+    usable, never taking over a working standalone setup:
+
+    * the explicit ``use_retroarch`` toggle keeps its existing meaning: route
+      through RetroArch and let :func:`validate_launch` report a missing binary
+      or core;
+    * otherwise ``controller.prefer_retroarch`` (default on) routes through
+      RetroArch only when a real RetroArch binary *and* a core for the system are
+      configured, and silently falls back to the standalone emulator when not.
+
+    This keeps a fresh, RetroArch-less install on its curated standalones while
+    letting a provisioned/detected RetroArch become the default automatically.
+    """
+    if config.get("use_retroarch"):
+        return True
+    if not config.get("controller", {}).get("prefer_retroarch", True):
+        return False
+    ra_path = _strip_wrapping_quotes(config.get("retroarch_path", ""))
+    core = config.get("retroarch_cores", {}).get(system_key, "")
+    return bool(ra_path) and Path(ra_path).is_file() and bool(core)
+
+
 def _is_flatpak_installed(flatpak_id):
     if flatpak_id in _flatpak_info_cache:
         return _flatpak_info_cache[flatpak_id]
@@ -97,7 +124,7 @@ def validate_launch(rom, config):
     if not rom_path or not Path(rom_path).is_file():
         return f"ROM file not found:\n{rom_path}"
 
-    if config.get("use_retroarch"):
+    if use_retroarch_for(config, system_key):
         retroarch_path = _strip_wrapping_quotes(config.get("retroarch_path", ""))
         if not retroarch_path:
             return "RetroArch is enabled, but no RetroArch binary is configured."
@@ -138,9 +165,9 @@ def build_launch_command(rom, config, platform=None, validate=True):
         if error:
             return None, error
 
-    if config.get("use_retroarch") and config.get("retroarch_path"):
-        ra = _strip_wrapping_quotes(config["retroarch_path"])
-        core = config["retroarch_cores"].get(system_key, "")
+    if use_retroarch_for(config, system_key):
+        ra = _strip_wrapping_quotes(config.get("retroarch_path", ""))
+        core = config.get("retroarch_cores", {}).get(system_key, "")
         if not core:
             return None, "No RetroArch core configured for this system."
         return [ra, "-L", core, rom_path], None
