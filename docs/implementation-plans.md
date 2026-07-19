@@ -395,3 +395,79 @@ F first (it restructures `_build_body`).
 | 4 | Favorites / collections | M | PR 0 |
 | 5 | Play-time tracking | S | PR 0, LaunchCoordinator |
 | 7 | RetroAchievements | M–L | config, #2b panel |
+| 8a | Seamless controller — SDL mapping inject | M | — |
+| 8b | Seamless controller — RetroArch couch default | S–M | #3 couch mode |
+
+---
+
+## 8. Seamless controller passthrough to emulators
+
+**Goal:** the pad "just works" inside launched emulators without the user hand-mapping each one.
+**Chosen approach (pinned):** phased — **Lever 1 (SDL mapping inject)** first, then **Lever 2
+(RetroArch autoconfig as the couch-mode default)**. Lever 3 (writing each emulator's own input
+config file) is deliberately deferred; it's per-emulator and version-fragile.
+
+### Background (why this is the design)
+
+RetroVault is a launcher: at launch the coordinator *releases* the pad (`controller.stop()` in
+`main_window._on_launch_input_disabled`) so the emulator owns the device. From then on the
+**emulator's own input config** governs — RetroVault writes none today (the manifest
+`FullscreenPolicy` "config" mode is metadata-only). All of RetroVault's recommended standalones
+(mGBA, DuckStation, Snes9x, ares, Mesen, RMG) use **SDL2** for input, so they auto-map any pad
+SDL recognizes. That's the lever.
+
+### 8a — SDL controller-mapping injection at launch (Lever 1)
+
+**Idea:** pass the connected pad's SDL mapping to the emulator process via environment variables
+SDL reads at startup, so an otherwise-unconfigured emulator recognizes the pad immediately.
+
+**New files**
+- `retrovault/data/gamecontrollerdb.txt` — bundled community SDL mapping DB (broad pad coverage).
+
+**Files to touch**
+- `input/sdl_backend.py` — expose the open controller's SDL mapping string + GUID
+  (pygame-ce `Controller.get_mapping()` / SDL `SDL_GameControllerMapping`). Add e.g.
+  `SdlBackend.controller_mapping() -> str | None`.
+- `core/launch.py` — **the injection point is the two `subprocess.Popen(cmd, cwd=...)` calls** in
+  `launch_rom` and `start_launch_process`. Add an `env=` argument built from `os.environ` plus:
+  `SDL_GAMECONTROLLERCONFIG` (the live pad's mapping line) and
+  `SDL_GAMECONTROLLERCONFIG_FILE` (path to the bundled `gamecontrollerdb.txt`). Thread the mapping
+  in via a new optional parameter or a field on `config` set by the launch coordinator (keep
+  `launch.py` decoupled from the UI/controller — the UI supplies the string).
+- `core/config.py` — `controller.assist_emulator_input: true` flag (+ migrate line) so users can
+  disable it if it fights an emulator's own config.
+- `ui/launch_overlay.py` / `main_window` — when launching, read the mapping from the live backend
+  and hand it to the launch call.
+
+**Notes / edge cases**
+- Env-only, non-destructive: writes nothing into emulator config dirs; if disabled or no pad is
+  connected, launch behaves exactly as today.
+- RetroArch ignores these SDL vars (it has its own input DB) — harmless; 8b covers RetroArch.
+- Flatpak launches (`flatpak run …`) need the vars passed through with `--env=` rather than the
+  process environment; handle in the flatpak command branch.
+
+**Testing**
+- `build_launch_command`/launch env builder: assert the SDL vars are present when a mapping is
+  supplied and absent when the flag is off or no pad. Assert the flatpak branch forwards `--env=`.
+- No real emulator or hardware in tests — inject a fake mapping string.
+
+**Effort:** M. **Independent** (no dependency on other features).
+
+### 8b — RetroArch autoconfig as the couch-mode default (Lever 2)
+
+**Idea:** RetroArch ships centralized controller **autoconfig** (zero-setup across all cores).
+For controller-first/couch mode (#3), default launches through the existing RetroArch path so
+input is guaranteed seamless everywhere, with the standalone emulators as the opt-out.
+
+**Files to touch**
+- `core/config.py` — a couch/controller-mode preference that prefers RetroArch when a core is
+  configured for the system (reuse existing `use_retroarch` + `retroarch_cores`).
+- `core/launch.py` — already routes RetroArch when `use_retroarch`; gate that on the couch
+  preference + per-system core availability, falling back to the standalone emulator otherwise.
+- `ui/` (couch mode, #3) — surface the "use RetroArch for controller mode" toggle.
+
+**Notes**
+- Tradeoff to surface in UI: RetroArch cores vs the curated standalones. Default couch → RetroArch
+  only when a core is present; never block a launch if RetroArch isn't set up.
+
+**Effort:** S–M. **Depends on:** #3 couch mode (shares the mode/preference plumbing).
