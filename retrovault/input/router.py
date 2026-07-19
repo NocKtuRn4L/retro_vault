@@ -305,6 +305,16 @@ if _QT_AVAILABLE:
             """Set an explicit routing target, overriding the active-window lookup."""
             self._target = widget
 
+        def controller_mapping(self):
+            """Return the backend's SDL controller-mapping string, if it exposes one.
+
+            Used to hand the connected pad's mapping to a launched emulator; read
+            it *before* the controller is released for the launch. Backends without
+            a ``controller_mapping`` (e.g. NullBackend) yield ``None``.
+            """
+            getter = getattr(self._backend, "controller_mapping", None)
+            return getter() if callable(getter) else None
+
         def _resolve_target(self):
             if self._target is not None:
                 return self._target

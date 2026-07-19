@@ -173,6 +173,7 @@ class SdlBackend:
         self._pygame = None  # lazily-imported pygame module, or None if absent
         self._controller_mod = None  # pygame._sdl2.controller module, or None
         self._controller = None  # an open GameController, or None
+        self._controller_index = None  # device index of the open controller, or None
         self._button_map: dict[int, str] = {}  # controller-button const -> name
         self._joystick = None  # raw-joystick fallback handle, or None
         self._started = False
@@ -232,6 +233,7 @@ class SdlBackend:
             except Exception:  # pragma: no cover - defensive cleanup
                 logger.debug("error quitting input device", exc_info=True)
         self._controller = None
+        self._controller_index = None
         self._joystick = None
         if self._controller_mod is not None:
             try:
@@ -261,6 +263,7 @@ class SdlBackend:
                 for index in range(controller.get_count()):
                     if controller.is_controller(index):
                         self._controller = controller.Controller(index)
+                        self._controller_index = index
                         return
             except Exception:  # pragma: no cover - defensive
                 logger.debug("failed to open game controller", exc_info=True)
@@ -304,6 +307,32 @@ class SdlBackend:
     def is_connected(self) -> bool:
         """Return whether a controller or joystick is currently open."""
         return self._controller is not None or self._joystick is not None
+
+    def controller_mapping(self) -> str | None:
+        """Return the open GameController's SDL mapping string, or ``None``.
+
+        The result is SDL's ``GUID,name,bindings`` form accepted by the
+        ``SDL_GAMECONTROLLERCONFIG`` environment variable, so a launched
+        SDL-based emulator can recognize the exact pad without the user mapping
+        it by hand. Only the normalized GameController path exposes a mapping;
+        the raw-joystick fallback and the no-pygame path return ``None``.
+        Fail-soft: any error yields ``None`` and never raises.
+        """
+        pygame = self._pygame
+        controller = self._controller
+        if pygame is None or controller is None or self._controller_index is None:
+            return None
+        try:
+            mapping = controller.get_mapping()
+            if not mapping:
+                return None
+            guid = pygame.joystick.Joystick(self._controller_index).get_guid()
+            name = getattr(controller, "name", "") or "Controller"
+            bindings = ",".join(f"{key}:{value}" for key, value in mapping.items())
+            return f"{guid},{name},{bindings},"
+        except Exception:  # pragma: no cover - defensive; mapping is best-effort
+            logger.debug("failed to read controller mapping", exc_info=True)
+            return None
 
     # ── polling ───────────────────────────────────────────────────────────────
     def poll(self) -> BackendState:

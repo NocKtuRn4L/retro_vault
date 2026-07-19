@@ -84,7 +84,7 @@ class LaunchSessionTests(unittest.TestCase):
         proc = subprocess.Popen(HARMLESS_EXIT_CMD)
         original = launch.start_launch_process
         launch_session_mod = sys.modules["retrovault.ui.launch_session"]
-        launch_session_mod.start_launch_process = lambda rom, config: (proc, None)
+        launch_session_mod.start_launch_process = lambda rom, config, controller_mapping=None: (proc, None)
         try:
             session.launch({}, {})
             self._wait_for_exit(session)
@@ -102,7 +102,7 @@ class LaunchSessionTests(unittest.TestCase):
 
         launch_session_mod = sys.modules["retrovault.ui.launch_session"]
         original = launch.start_launch_process
-        launch_session_mod.start_launch_process = lambda rom, config: (None, "boom")
+        launch_session_mod.start_launch_process = lambda rom, config, controller_mapping=None: (None, "boom")
         try:
             session.launch({}, {})
         finally:
@@ -121,7 +121,7 @@ class LaunchSessionTests(unittest.TestCase):
 
         launch_session_mod = sys.modules["retrovault.ui.launch_session"]
         original = launch.start_launch_process
-        launch_session_mod.start_launch_process = lambda rom, config: (None, None)
+        launch_session_mod.start_launch_process = lambda rom, config, controller_mapping=None: (None, None)
         try:
             session.launch({}, {})
         finally:

@@ -32,7 +32,7 @@ class FakeSession(QObject):
         super().__init__(parent)
         self.launch_calls = []
 
-    def launch(self, rom, config):
+    def launch(self, rom, config, controller_mapping=None):
         self.launch_calls.append((rom, config))
 
 

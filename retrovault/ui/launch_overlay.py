@@ -204,7 +204,7 @@ class LaunchCoordinator(QObject):
         if restore_view is not None:
             self._restore_view = restore_view
 
-    def launch(self, rom, config):
+    def launch(self, rom, config, controller_mapping=None):
         """Begin launching ``rom`` with ``config``, covering the UI in black."""
         # Snapshot the view before anything changes, then cover + disable input.
         self._save_view()
@@ -222,7 +222,7 @@ class LaunchCoordinator(QObject):
         session.failed.connect(self._on_failed)
         # Keep a reference so the session (and its wait thread) survives.
         self._session = session
-        session.launch(rom, config)
+        session.launch(rom, config, controller_mapping=controller_mapping)
 
     # -- session signal handlers -------------------------------------------
     def _on_starting(self):

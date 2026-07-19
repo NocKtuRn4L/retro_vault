@@ -80,6 +80,10 @@ DEFAULT_CONFIG = {
         "repeat_delay_ms": 400,   # initial delay before a held direction repeats
         "repeat_rate_ms": 120,    # interval between repeats while held
         "accept_button": "south",  # "south" or "east" — which face button is Accept
+        # Pass the connected pad's SDL mapping to launched SDL-based emulators via
+        # SDL_GAMECONTROLLERCONFIG so the controller works without manual per-emulator
+        # setup. Non-destructive (env only); disable if it fights an emulator's own config.
+        "assist_emulator_input": True,
     },
     # Metadata + artwork scraping (see retrovault.providers.scraper). Credentials
     # are user-supplied — ScreenScraper requires a (free) account. Disabled by

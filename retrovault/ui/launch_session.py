@@ -64,7 +64,7 @@ class LaunchSession(QObject):
         self._proc = None
         self._thread = None
 
-    def launch(self, rom, config):
+    def launch(self, rom, config, controller_mapping=None):
         """Start the emulator for ``rom`` using ``config`` and track its lifetime.
 
         Emits ``starting`` immediately. On validation/launch failure emits
@@ -74,7 +74,7 @@ class LaunchSession(QObject):
         """
         self.starting.emit()
 
-        proc, error = start_launch_process(rom, config)
+        proc, error = start_launch_process(rom, config, controller_mapping=controller_mapping)
 
         if error is not None:
             self.failed.emit(error)

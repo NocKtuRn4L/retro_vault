@@ -2,11 +2,44 @@
 
 import copy
 import logging
+import os
 import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# Environment variable SDL reads at startup to load a controller mapping. Passing
+# the connected pad's mapping here lets an SDL-based emulator recognize it with no
+# manual per-emulator setup. See docs/implementation-plans.md section 8a.
+SDL_MAPPING_ENV = "SDL_GAMECONTROLLERCONFIG"
+
+
+def _assist_emulator_input(config):
+    return bool(config.get("controller", {}).get("assist_emulator_input", True))
+
+
+def _emulator_env(config, controller_mapping):
+    """Return a process ``env`` dict for the emulator, or ``None`` for the default.
+
+    When input assist is enabled and a controller mapping is supplied, returns a
+    copy of the current environment with :data:`SDL_MAPPING_ENV` set so a launched
+    SDL-based emulator recognizes the pad. Returns ``None`` (use the inherited
+    environment unchanged) when assist is off or no mapping is available — so the
+    behavior is identical to before whenever there is nothing to inject.
+    """
+    if not controller_mapping or not _assist_emulator_input(config):
+        return None
+    env = os.environ.copy()
+    env[SDL_MAPPING_ENV] = controller_mapping
+    return env
+
+
+def _flatpak_env_args(config, controller_mapping):
+    """Flatpak sandboxes the process env, so the mapping must cross via --env=."""
+    if not controller_mapping or not _assist_emulator_input(config):
+        return []
+    return [f"--env={SDL_MAPPING_ENV}={controller_mapping}"]
 
 # Cache of flatpak `flatpak info <id>` results, keyed by flatpak_id, so
 # validation doesn't re-shell out on every launch/audit pass.
@@ -128,7 +161,7 @@ def validate_launch(rom, config):
     return None
 
 
-def build_launch_command(rom, config, platform=None, validate=True):
+def build_launch_command(rom, config, platform=None, validate=True, controller_mapping=None):
     platform = platform or sys.platform
     system_key = rom["system"]
     rom_path = rom["path"]
@@ -154,7 +187,8 @@ def build_launch_command(rom, config, platform=None, validate=True):
             return None, f"No emulator configured for {system_key.upper()}.\nGo to Settings -> Emulators to set one up."
         extra_args = _split_args_template(emu.get("args", "{rom}"), rom_path, platform=platform)
         extra_args = [_resolve_core_arg(arg, config, system_key) for arg in extra_args]
-        return ["flatpak", "run", flatpak_id] + extra_args, None
+        env_args = _flatpak_env_args(config, controller_mapping)
+        return ["flatpak", "run"] + env_args + [flatpak_id] + extra_args, None
 
     emu_path = _strip_wrapping_quotes(emu.get("path", ""))
     if not emu_path:
@@ -198,17 +232,18 @@ def _windows_shell_execute(cmd, verb="open"):
     )
 
 
-def launch_rom(rom, config):
-    cmd, error = build_launch_command(rom, config)
+def launch_rom(rom, config, controller_mapping=None):
+    cmd, error = build_launch_command(rom, config, controller_mapping=controller_mapping)
     if error:
         logging.warning("Launch validation failed for %s: %s", rom.get("path"), error)
         return False, error
 
+    env = _emulator_env(config, controller_mapping)
     try:
         logging.info("Launching ROM '%s' with command: %s", rom.get("name"), subprocess.list2cmdline(cmd))
         if sys.platform == "win32":
             try:
-                proc = subprocess.Popen(cmd, cwd=_command_working_dir(cmd))
+                proc = subprocess.Popen(cmd, cwd=_command_working_dir(cmd), env=env)
                 logging.info("Launch started with pid %s", proc.pid)
                 return True, f"Launched! PID {proc.pid}"
             except PermissionError:
@@ -226,7 +261,7 @@ def launch_rom(rom, config):
                 )
             logging.info("Launch handed to ShellExecute with code %s", ret)
         else:
-            proc = subprocess.Popen(cmd, cwd=_command_working_dir(cmd), close_fds=True)
+            proc = subprocess.Popen(cmd, cwd=_command_working_dir(cmd), close_fds=True, env=env)
             logging.info("Launch started with pid %s", proc.pid)
         return True, "Launched!"
     except FileNotFoundError:
@@ -247,7 +282,7 @@ def launch_rom(rom, config):
         return False, f"{type(e).__name__}: {e}"
 
 
-def start_launch_process(rom, config):
+def start_launch_process(rom, config, controller_mapping=None):
     """Build, validate, and start the emulator process, returning a waitable handle.
 
     Returns a ``(proc, error)`` tuple:
@@ -266,16 +301,17 @@ def start_launch_process(rom, config):
     Unlike :func:`launch_rom` (fire-and-forget, kept for existing callers), this
     returns the process handle so a caller can wait for the emulator to exit.
     """
-    cmd, error = build_launch_command(rom, config)
+    cmd, error = build_launch_command(rom, config, controller_mapping=controller_mapping)
     if error:
         logging.warning("Launch validation failed for %s: %s", rom.get("path"), error)
         return None, error
 
+    env = _emulator_env(config, controller_mapping)
     try:
         logging.info("Launching ROM '%s' with command: %s", rom.get("name"), subprocess.list2cmdline(cmd))
         if sys.platform == "win32":
             try:
-                proc = subprocess.Popen(cmd, cwd=_command_working_dir(cmd))
+                proc = subprocess.Popen(cmd, cwd=_command_working_dir(cmd), env=env)
                 logging.info("Launch started with pid %s", proc.pid)
                 return proc, None
             except PermissionError:
@@ -295,7 +331,7 @@ def start_launch_process(rom, config):
             # Launched, but ShellExecute gives no Popen handle to wait on.
             return None, None
 
-        proc = subprocess.Popen(cmd, cwd=_command_working_dir(cmd), close_fds=True)
+        proc = subprocess.Popen(cmd, cwd=_command_working_dir(cmd), close_fds=True, env=env)
         logging.info("Launch started with pid %s", proc.pid)
         return proc, None
     except FileNotFoundError:

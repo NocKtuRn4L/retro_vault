@@ -830,14 +830,17 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("No ROM selected", 3000)
             return
         self.statusBar().showMessage(f"Launching {rom.get('name', 'ROM')}...")
+        # Capture the pad's SDL mapping now, while the controller is still open —
+        # the launch releases it — so the emulator can inherit it (SDL_GAMECONTROLLERCONFIG).
+        mapping = self.controller.controller_mapping() if self.controller else None
         if self.launch_coordinator is not None:
             # Seamless couch-console handoff: the coordinator covers the UI,
             # suspends the controller, runs the emulator, and restores on exit.
-            self.launch_coordinator.launch(rom, self.config_data)
+            self.launch_coordinator.launch(rom, self.config_data, controller_mapping=mapping)
             return
         # Fallback (coordinator unavailable): legacy fire-and-forget launch.
         self._set_controller_busy(True)
-        worker = WorkerThread(launch_rom, rom, self.config_data, parent=self)
+        worker = WorkerThread(launch_rom, rom, self.config_data, mapping, parent=self)
         worker.succeeded.connect(lambda result: self._launch_finished(rom, result))
         worker.failed.connect(lambda msg: self._launch_failed(rom, msg))
         self._track_worker(worker)
