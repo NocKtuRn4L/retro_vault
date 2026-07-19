@@ -158,7 +158,29 @@ class MainWindowNavTests(unittest.TestCase):
             with mock.patch.object(mw, "MainMenuDialog") as dialog_cls:
                 dialog_cls.return_value.exec.return_value = 0  # Rejected
                 self._feed(window, Action.MENU)
+                # MENU defers the open to the next event-loop turn (see
+                # test_menu_open_is_deferred_off_the_router_tick); pump it.
+                self.app.processEvents()
                 dialog_cls.assert_called_once()
+        finally:
+            window.close()
+
+    def test_menu_open_is_deferred_off_the_router_tick(self):
+        """MENU must schedule _open_menu, never call its blocking exec() inline.
+
+        _on_controller_action runs inside the controller router's QTimer tick.
+        Opening the menu inline would enter the dialog's nested exec() while that
+        tick is on the stack; Qt then won't re-enter the timer, so the backend
+        stops being polled and the controller cannot navigate the open menu.
+        The handler must defer with QTimer.singleShot(0, ...) instead.
+        """
+        window = self._make_window()
+        try:
+            window._open_menu = mock.Mock()
+            with mock.patch.object(mw, "QTimer") as timer_cls:
+                self._feed(window, Action.MENU)
+            window._open_menu.assert_not_called()  # not opened inline
+            timer_cls.singleShot.assert_called_once_with(0, window._open_menu)
         finally:
             window.close()
 
