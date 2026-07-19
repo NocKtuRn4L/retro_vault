@@ -86,11 +86,12 @@ DEFAULT_CONFIG = {
         # its curated standalone emulators. See core.launch.use_retroarch_for.
         "prefer_retroarch": True,
     },
-    # Metadata + artwork scraping (see retrovault.providers.scraper). Credentials
-    # are user-supplied — ScreenScraper requires a (free) account. Disabled by
-    # default so a fresh install never touches the network unprompted.
+    # Metadata + artwork scraping (see retrovault.providers.scraper). The default
+    # "libretro" provider (libretro-thumbnails) needs no account and matches box
+    # art by ROM name. "screenscraper" is richer (hash-accurate + text metadata)
+    # but requires user credentials. Scraping only runs when the user asks for it.
     "scraper": {
-        "provider": "screenscraper",
+        "provider": "libretro",
         "username": "",
         "password": "",
         "region": "us",

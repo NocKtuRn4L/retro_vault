@@ -46,9 +46,10 @@ from ..input.router import ControllerRouter, InputStateMachine
 from ..input.sdl_backend import SdlBackend
 from .detail_panel import DetailPanel
 from .launch_overlay import MIN_PLAY_SECONDS, LaunchCoordinator
-from .library_model import LibraryFilterProxyModel, LibraryModel
+from .library_model import BOXART_THUMB, LibraryFilterProxyModel, LibraryModel
 from .main_menu import MainMenuDialog
 from .onscreen_keyboard import OnScreenKeyboard
+from .scrape_worker import ScrapeWorker
 from .settings_dialog import SettingsDialog
 from .setup_wizard import SetupWizard
 
@@ -220,6 +221,10 @@ class MainWindow(QMainWindow):
         settings_btn.clicked.connect(self.on_settings)
         layout.addWidget(settings_btn)
 
+        self.scrape_btn = QPushButton("SCRAPE ART")
+        self.scrape_btn.clicked.connect(self.on_scrape_artwork)
+        layout.addWidget(self.scrape_btn)
+
         scan_roms_btn = QPushButton("SCAN ROMS")
         scan_roms_btn.setProperty("accent", "true")
         scan_roms_btn.clicked.connect(self.on_scan_roms)
@@ -262,6 +267,7 @@ class MainWindow(QMainWindow):
 
         self.table = QTableView()
         self.table.setModel(self.proxy)
+        self.table.setIconSize(BOXART_THUMB)  # room for box-art thumbnails
         self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self.table.setSortingEnabled(True)
@@ -522,6 +528,7 @@ class MainWindow(QMainWindow):
             ("Search Games", self.on_search_via_keyboard),
             ("Scan ROMs", self.on_scan_roms),
             ("Add ROM Folder", self.on_add_rom_dir),
+            ("Scrape Artwork", self.on_scrape_artwork),
             ("Toggle Favorite (selected game)", self._toggle_favorite_selected),
             ("Setup Wizard", self.on_setup),
             ("Settings", self.on_settings),
@@ -776,6 +783,11 @@ class MainWindow(QMainWindow):
         if self.controller:
             self.controller.stop()
         for worker in self._workers:
+            # A scrape worker runs a blocking network loop; ask it to stop at the
+            # next entry so close doesn't hang or leave the thread running.
+            if hasattr(worker, "cancel"):
+                worker.cancel()
+        for worker in self._workers:
             worker.quit()
             worker.wait(500)
         event.accept()
@@ -823,6 +835,43 @@ class MainWindow(QMainWindow):
     def _scan_failed(self, msg):
         self._set_controller_busy(False)
         QMessageBox.warning(self, "Scan ROMs", msg)
+
+    # ── Artwork scraping (libretro-thumbnails by default; see providers.scraper) ──
+    def on_scrape_artwork(self):
+        """Fetch box art / metadata for the library on a background thread."""
+        if not self.library:
+            self.statusBar().showMessage("No games to scrape — scan ROMs first", 4000)
+            return
+        if getattr(self, "_scrape_worker", None) is not None:
+            return  # a scrape is already running
+        self.scrape_btn.setEnabled(False)
+        self.statusBar().showMessage("Scraping artwork…")
+        worker = ScrapeWorker(self.library, self.config_data, parent=self)
+        self._scrape_worker = worker
+        worker.progress.connect(self._scrape_progress)
+        worker.finished_library.connect(self._scrape_finished)
+        worker.failed.connect(self._scrape_failed)
+        worker.finished.connect(self._scrape_cleanup)
+        self._track_worker(worker)
+
+    def _scrape_progress(self, done, total):
+        self.statusBar().showMessage(f"Scraping artwork… {done}/{total}")
+
+    def _scrape_finished(self, library):
+        save_library(library)
+        self._refresh_library(library)
+        covers = sum(1 for rom in library if (rom.get("media") or {}).get("boxart"))
+        self.statusBar().showMessage(f"Artwork updated — {covers} covers", 5000)
+
+    def _scrape_failed(self, msg):
+        QMessageBox.warning(self, "Scrape Artwork", msg)
+
+    def _scrape_cleanup(self):
+        worker = getattr(self, "_scrape_worker", None)
+        self._scrape_worker = None
+        self.scrape_btn.setEnabled(True)
+        if worker is not None:
+            worker.deleteLater()
 
     def on_launch_selected(self):
         rom = self._selected_rom()

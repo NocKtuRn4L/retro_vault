@@ -23,7 +23,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Mapping, Optional, Protocol, runtime_checkable
 
-from ..core.media import media_paths_for
+from ..core.media import has_media, media_paths_for
 
 log = logging.getLogger(__name__)
 
@@ -365,13 +365,145 @@ def scrape_rom(
     return result
 
 
+# ── libretro-thumbnails implementation ────────────────────────────────────────
+class LibretroThumbnailsClient:
+    """A name-matched :class:`Scraper` backed by the libretro-thumbnails image set.
+
+    No account or API key: images are static files at
+    ``<base>/<system folder>/<Named_*>/<game name>.png``. Matching is by the ROM's
+    (No-Intro-style) name — hashes are ignored — and this source provides images
+    only, no text metadata. URLs are returned optimistically for each media kind;
+    a game that lacks a given kind 404s and is skipped by :func:`scrape_rom`'s
+    fail-soft download, so no empty files are cached.
+    """
+
+    # Characters libretro-thumbnails replaces with "_" in its file names.
+    _UNSAFE = set('&*/:`<>?\\|"')
+
+    def __init__(self, transport: HttpTransport, config: Optional[Mapping] = None, data: Mapping = SCRAPER_DATA) -> None:
+        self.transport = transport
+        self.config = config or {}
+        self.data = data
+
+    def _libretro(self) -> Mapping:
+        return self.data.get("libretro", {})
+
+    @classmethod
+    def normalize_name(cls, name: str) -> str:
+        """Apply libretro-thumbnails' filename character substitutions."""
+        return "".join("_" if ch in cls._UNSAFE else ch for ch in name).strip()
+
+    def find_game(
+        self,
+        system: str,
+        *,
+        crc: Optional[str] = None,
+        md5: Optional[str] = None,
+        name: Optional[str] = None,
+    ) -> Optional[GameInfo]:
+        from urllib.parse import quote
+
+        libretro = self._libretro()
+        folder = libretro.get("systems", {}).get(system)
+        if not folder or not name:
+            return None
+        base = str(libretro.get("base_url", "")).rstrip("/")
+        safe = self.normalize_name(name)
+        media_urls = {
+            kind: f"{base}/{quote(folder)}/{sub}/{quote(safe)}.png"
+            for kind, sub in libretro.get("media_paths", {}).items()
+        }
+        return GameInfo(metadata={}, media_urls=media_urls)
+
+    def fetch_media(self, url: str) -> Optional[bytes]:
+        if not url:
+            return None
+        try:
+            return self.transport.get_bytes(url)
+        except Exception:  # noqa: BLE001 - fail soft (404 for a missing kind is normal)
+            log.info("thumbnail not available: %s", url)
+            return None
+
+
+# ── Concrete transport (real network; injected in production, faked in tests) ──
+class UrllibTransport:
+    """A :class:`HttpTransport` over ``urllib``. Never used in tests."""
+
+    def __init__(self, *, timeout: float = 15.0, user_agent: str = "retrovault") -> None:
+        self.timeout = timeout
+        self.user_agent = user_agent
+
+    def _open(self, url: str):
+        import urllib.request
+
+        request = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
+        return urllib.request.urlopen(request, timeout=self.timeout)
+
+    def get_bytes(self, url: str) -> bytes:
+        with self._open(url) as response:
+            return response.read()
+
+    def get_json(self, url: str, params: Mapping[str, str]) -> dict:
+        import urllib.parse
+
+        full = url + ("?" + urllib.parse.urlencode(dict(params)) if params else "")
+        with self._open(full) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+
 def build_client(config: Mapping, transport: HttpTransport) -> Scraper:
     """Construct the configured provider client around ``transport``.
 
-    Only ScreenScraper exists today; unknown providers fall back to it so the app
-    degrades gracefully rather than crashing on a stale config value.
+    Defaults to the account-free libretro-thumbnails source; ``screenscraper`` is
+    available for richer metadata when the user supplies credentials. Unknown
+    providers fall back to libretro so the app degrades gracefully.
     """
-    provider = str((config.get("scraper") or {}).get("provider", "screenscraper"))
-    if provider and provider != "screenscraper":
-        log.warning("unknown scraper provider %r; using screenscraper", provider)
-    return ScreenScraperClient(transport, config)
+    provider = str((config.get("scraper") or {}).get("provider", "libretro"))
+    if provider == "screenscraper":
+        return ScreenScraperClient(transport, config)
+    if provider and provider != "libretro":
+        log.warning("unknown scraper provider %r; using libretro-thumbnails", provider)
+    return LibretroThumbnailsClient(transport, config)
+
+
+def scrape_library(
+    library,
+    config: Mapping,
+    client: Scraper,
+    *,
+    media_base=None,
+    on_progress=None,
+    should_cancel=None,
+    force: bool = False,
+):
+    """Scrape media/metadata for every entry, returning a NEW library list.
+
+    Entries that already have cached media are skipped unless ``force``. Merges
+    any found ``media``/``metadata`` onto a copy of each entry (so
+    ``core.library.merge_scan`` preserves it across rescans). Calls
+    ``on_progress(done, total)`` after each entry and stops early — leaving the
+    remaining entries untouched — when ``should_cancel()`` returns True. A single
+    entry's failure never aborts the run.
+    """
+    items = list(library or [])
+    total = len(items)
+    updated = []
+    for index, rom in enumerate(items, start=1):
+        if should_cancel and should_cancel():
+            updated.extend(items[index - 1:])
+            break
+        entry = dict(rom)
+        if force or not has_media(rom, media_base):
+            try:
+                result = scrape_rom(rom, config, client, media_base=media_base)
+            except Exception:  # noqa: BLE001 - one bad entry must not abort the batch
+                log.warning("scrape failed for %s", rom.get("name"), exc_info=True)
+                result = {"media": {}, "metadata": {}}
+            if result.get("media"):
+                entry["media"] = {**entry.get("media", {}), **result["media"]}
+            if result.get("metadata"):
+                entry["metadata"] = {**entry.get("metadata", {}), **result["metadata"]}
+        updated.append(entry)
+        if on_progress:
+            on_progress(index, total)
+    return updated

@@ -223,7 +223,7 @@ class HashTests(unittest.TestCase):
 class ConfigScraperBlockTests(unittest.TestCase):
     def test_default_config_has_scraper_block(self):
         block = config.DEFAULT_CONFIG["scraper"]
-        self.assertEqual(block["provider"], "screenscraper")
+        self.assertEqual(block["provider"], "libretro")
         self.assertFalse(block["enabled"])
         self.assertEqual(block["region"], "us")
 
@@ -232,7 +232,7 @@ class ConfigScraperBlockTests(unittest.TestCase):
         self.assertEqual(migrated["scraper"]["username"], "me")
         self.assertTrue(migrated["scraper"]["enabled"])
         # Unspecified keys filled from defaults.
-        self.assertEqual(migrated["scraper"]["provider"], "screenscraper")
+        self.assertEqual(migrated["scraper"]["provider"], "libretro")
         self.assertEqual(migrated["scraper"]["region"], "us")
 
     def test_migrate_adds_scraper_block_when_absent(self):

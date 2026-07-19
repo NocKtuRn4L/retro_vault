@@ -1,7 +1,10 @@
 """Qt model/proxy classes for the ROM library."""
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSize, QSortFilterProxyModel, Qt
+from PySide6.QtGui import QColor, QIcon, QPixmap, QPixmapCache
+
+# Box-art thumbnail size for the library list's decoration (portrait-ish).
+BOXART_THUMB = QSize(34, 46)
 
 
 class LibraryModel(QAbstractTableModel):
@@ -38,6 +41,9 @@ class LibraryModel(QAbstractTableModel):
             if index.column() == 2:
                 return rom.get("ext", "")
 
+        if role == Qt.ItemDataRole.DecorationRole and index.column() == 0:
+            return self._boxart_icon(rom)
+
         if role == Qt.ItemDataRole.ToolTipRole:
             return rom.get("path", "")
 
@@ -53,6 +59,30 @@ class LibraryModel(QAbstractTableModel):
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
             return self.COLUMNS[section]
         return None
+
+    def _boxart_icon(self, rom):
+        """Return a cached box-art thumbnail QIcon for ``rom``, or None.
+
+        Loads the cached box art lazily and keeps a scaled copy in Qt's global
+        QPixmapCache so scrolling never re-decodes from disk. A missing file or
+        an entry with no ``media.boxart`` yields None (the row shows no icon).
+        """
+        path = (rom.get("media") or {}).get("boxart")
+        if not path:
+            return None
+        key = f"rv_boxart::{path}"
+        pixmap = QPixmapCache.find(key)
+        if pixmap is None or pixmap.isNull():
+            source = QPixmap(path)
+            if source.isNull():
+                return None
+            pixmap = source.scaled(
+                BOXART_THUMB,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            QPixmapCache.insert(key, pixmap)
+        return QIcon(pixmap)
 
     def rom_at(self, row):
         if 0 <= row < len(self.library):
