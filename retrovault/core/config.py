@@ -80,6 +80,11 @@ DEFAULT_CONFIG = {
         "repeat_delay_ms": 400,   # initial delay before a held direction repeats
         "repeat_rate_ms": 120,    # interval between repeats while held
         "accept_button": "south",  # "south" or "east" — which face button is Accept
+        # Prefer RetroArch (centralized controller autoconfig -> seamless pads with
+        # no per-emulator setup) whenever it's configured with a core for a system.
+        # Inert until RetroArch is actually set up, so a fresh install keeps using
+        # its curated standalone emulators. See core.launch.use_retroarch_for.
+        "prefer_retroarch": True,
     },
     # Metadata + artwork scraping (see retrovault.providers.scraper). Credentials
     # are user-supplied — ScreenScraper requires a (free) account. Disabled by
