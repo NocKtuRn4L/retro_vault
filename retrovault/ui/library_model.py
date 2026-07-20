@@ -61,26 +61,39 @@ class LibraryModel(QAbstractTableModel):
         return None
 
     def _boxart_icon(self, rom):
-        """Return a cached box-art thumbnail QIcon for ``rom``, or None.
+        """Return a box-art thumbnail QIcon for ``rom``, always the same size.
 
-        Loads the cached box art lazily and keeps a scaled copy in Qt's global
-        QPixmapCache so scrolling never re-decodes from disk. A missing file or
-        an entry with no ``media.boxart`` yields None (the row shows no icon).
+        Loads the cached box art lazily (scaled copy kept in Qt's global
+        QPixmapCache so scrolling never re-decodes from disk). When a row has no
+        box art — no ``media.boxart``, or the file is missing/unreadable — it
+        returns a transparent placeholder of the same size rather than ``None``,
+        so every row reserves identical icon space and the list stays aligned and
+        uniform in height whether or not a game has a cover.
         """
         path = (rom.get("media") or {}).get("boxart")
-        if not path:
-            return None
-        key = f"rv_boxart::{path}"
+        if path:
+            key = f"rv_boxart::{path}"
+            pixmap = QPixmapCache.find(key)
+            if pixmap is None or pixmap.isNull():
+                source = QPixmap(path)
+                if not source.isNull():
+                    pixmap = source.scaled(
+                        BOXART_THUMB,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                    QPixmapCache.insert(key, pixmap)
+            if pixmap is not None and not pixmap.isNull():
+                return QIcon(pixmap)
+        return self._placeholder_icon()
+
+    def _placeholder_icon(self):
+        """A cached, transparent, thumbnail-sized icon that reserves row space."""
+        key = "rv_boxart_placeholder"
         pixmap = QPixmapCache.find(key)
         if pixmap is None or pixmap.isNull():
-            source = QPixmap(path)
-            if source.isNull():
-                return None
-            pixmap = source.scaled(
-                BOXART_THUMB,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
+            pixmap = QPixmap(BOXART_THUMB)
+            pixmap.fill(Qt.GlobalColor.transparent)
             QPixmapCache.insert(key, pixmap)
         return QIcon(pixmap)
 

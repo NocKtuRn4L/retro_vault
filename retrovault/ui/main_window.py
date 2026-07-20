@@ -268,6 +268,8 @@ class MainWindow(QMainWindow):
         self.table = QTableView()
         self.table.setModel(self.proxy)
         self.table.setIconSize(BOXART_THUMB)  # room for box-art thumbnails
+        self.table.setWordWrap(False)  # single-line names; uniform rows
+        self.table.verticalHeader().setDefaultSectionSize(BOXART_THUMB.height() + 6)
         self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self.table.setSortingEnabled(True)

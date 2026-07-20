@@ -43,12 +43,17 @@ class BoxartDecorationTests(unittest.TestCase):
         self.assertIsInstance(icon, QIcon)
         self.assertFalse(icon.isNull())
 
-    def test_none_when_no_media(self):
-        self.assertIsNone(self._icon({"name": "G", "system": "nes"}))
+    def test_placeholder_icon_when_no_media(self):
+        # A uniform, thumbnail-sized placeholder keeps rows aligned even with no art.
+        icon = self._icon({"name": "G", "system": "nes"})
+        self.assertIsInstance(icon, QIcon)
+        self.assertFalse(icon.isNull())
 
-    def test_none_when_boxart_file_missing(self):
+    def test_placeholder_icon_when_boxart_file_missing(self):
         rom = {"name": "G", "system": "nes", "media": {"boxart": str(self.png) + ".missing"}}
-        self.assertIsNone(self._icon(rom))
+        icon = self._icon(rom)
+        self.assertIsInstance(icon, QIcon)
+        self.assertFalse(icon.isNull())
 
 
 if __name__ == "__main__":
