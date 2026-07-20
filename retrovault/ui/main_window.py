@@ -303,8 +303,14 @@ class MainWindow(QMainWindow):
         self.body_splitter.setSizes([760, 300])
         body_layout.addWidget(self.body_splitter, 1)
 
-        # Update the panel whenever the selected ROM changes.
+        # Update the panel whenever the selected ROM changes. Drive it off
+        # selectionChanged (what _selected_rom reads) as well as currentRowChanged:
+        # after a model reset the current index and the selection can diverge, so
+        # currentRowChanged alone would leave the panel showing a stale game.
         self.table.selectionModel().currentRowChanged.connect(
+            lambda *_: self._update_detail_panel()
+        )
+        self.table.selectionModel().selectionChanged.connect(
             lambda *_: self._update_detail_panel()
         )
         self._update_detail_panel()
@@ -652,6 +658,9 @@ class MainWindow(QMainWindow):
         self._refresh_sidebar()
         self._update_count_label()
         self._refresh_empty_state()
+        # The model reset clears the selection without firing currentRowChanged,
+        # so resync the detail panel explicitly (else it shows a stale game).
+        self._update_detail_panel()
 
     def _refresh_empty_state(self):
         has_rows = self.proxy.rowCount() > 0

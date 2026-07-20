@@ -204,6 +204,28 @@ class MainWindowNavTests(unittest.TestCase):
         finally:
             window.close()
 
+    # ── Detail panel sync ─────────────────────────────────────────────────────
+    def test_detail_panel_resyncs_after_library_refresh(self):
+        """A scan/scrape refresh must not leave the panel showing a stale game.
+
+        The model reset clears the selection without firing currentRowChanged, so
+        without an explicit resync the panel keeps the previously-selected game.
+        """
+        window = self._make_window()
+        try:
+            window._select_proxy_row(0)
+            self.app.processEvents()
+            selected = window._selected_rom()
+            self.assertIsNotNone(selected)
+            self.assertIn(selected["name"], window.detail_panel.name_label.text())
+
+            window._refresh_library(list(FAKE_LIBRARY))
+            self.app.processEvents()
+            self.assertIsNone(window._selected_rom())
+            self.assertEqual(window.detail_panel.name_label.text(), "No game selected")
+        finally:
+            window.close()
+
 
 if __name__ == "__main__":
     unittest.main()
