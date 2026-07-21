@@ -1,7 +1,15 @@
 # RetroVault — Implementation Plans
 
 _Plans for the priority additions from `competitive-research-and-ideas.md`._
-_Grounded in the current codebase (as of branch `feat/controller-support`)._
+_Status refreshed 2026-07-20 against branch `feat/cover-art-scraping` (commit `b327db0`)._
+
+**Shipped so far:** PR 0 (`merge_scan`), #6 emulator auto-detect wiring, #1a scraper backend,
+#5 play-time tracking, #4 favorites/collections, #2b detail panel, #8a RetroArch-first
+controller routing, and #1b scrape UI (on `feat/cover-art-scraping`, with
+libretro-thumbnails as the default no-credentials provider).
+**Still open:** #2 grid view, #3 couch mode, #7 RetroAchievements, #8b RetroArch
+provisioning, the ScreenScraper credentials UI, and the fixes in the
+["Codebase review findings"](#9-codebase-review-findings-2026-07-20) section below.
 
 ## Architectural notes that shape every plan
 
@@ -48,10 +56,29 @@ the default:
 
 ---
 
-## 1. Metadata + artwork scraping (foundation)
+## 1. Metadata + artwork scraping (foundation) — ✅ mostly shipped
 
-**Goal:** fetch box art, title logo, screenshot, and text metadata (synopsis, genre, players,
-rating, year) per game and cache them locally.
+**Status:** 1a (backend) merged as PR #5; 1b (UI) shipped on `feat/cover-art-scraping`.
+The implementation diverged from this plan in one good way: the **default provider is
+libretro-thumbnails** (`LibretroThumbnailsClient` in `providers/scraper.py`) — name-matched
+box art, no account needed — with the planned `ScreenScraperClient` also implemented and
+selectable via `config["scraper"]["provider"] = "screenscraper"`. `ScrapeWorker`
+(`ui/scrape_worker.py`) runs the batch off-thread with progress + cooperative cancel, wired
+to a top-bar "SCRAPE ART" button and a MENU entry.
+
+**Remaining gaps:**
+- `ui/settings_dialog.py` has **no scraper section** — ScreenScraper credentials/region and
+  the provider choice can only be set by hand-editing `config.json`. Add a Scraper tab
+  (provider combo, username/password, region) following the dialog's controller-nav pattern.
+- "Force refresh" is dead config: `ScrapeWorker(force=...)` exists but
+  `on_scrape_artwork` never passes it. Add a re-scrape path (e.g. a second MENU entry or a
+  modifier prompt) so users can replace bad matches.
+- Text metadata (synopsis/genre/players/rating/year) only comes from ScreenScraper; the
+  detail panel renders mostly empty fields for libretro-scraped libraries. Once the
+  credentials UI exists, document the trade-off in the wizard/settings.
+
+**Goal (original):** fetch box art, title logo, screenshot, and text metadata (synopsis,
+genre, players, rating, year) per game and cache them locally.
 
 **New files**
 - `core/media.py` — media cache paths + helpers (`media_paths_for(rom)`, `has_media(rom)`).
@@ -101,9 +128,15 @@ after 1a merges.
 
 ---
 
-## 2. Cover-art grid view
+## 2. Cover-art grid view — ⬜ open (next big visual win)
 
 **Goal:** a box-art grid alongside the current list; this is the single biggest visual win.
+
+**Status update:** the model side is already half done — `LibraryModel` now returns a
+`DecorationRole` box-art icon (with `QPixmapCache` + a transparent placeholder, see
+`ui/library_model.py:_boxart_icon`). The grid work is now mostly the view/stack/nav wiring
+below; note `BOXART_THUMB` is list-sized (34×46) so the grid needs its own larger thumb size
+(and distinct cache keys, e.g. `rv_boxart_grid::<path>`).
 
 **New files**
 - `ui/grid_view.py` — a `QListView` in `IconMode` (or a `QTableView` with a custom
@@ -138,7 +171,7 @@ after 1a merges.
 
 ---
 
-## 2b. Game detail panel (was missing from this plan)
+## 2b. Game detail panel — ✅ shipped (PR #8 + sync fixes on `feat/cover-art-scraping`)
 
 **Goal:** somewhere to *show* what #1 scrapes and #7 fetches. The original plan referenced a
 "detail panel" from #1 and #7 but never planned one — without it, scraped synopsis/genre/ratings
@@ -161,7 +194,7 @@ and achievement counts have no home.
 
 ---
 
-## 3. Controller-first fullscreen "couch" mode (finish in-flight work)
+## 3. Controller-first fullscreen "couch" mode — ⬜ open
 
 **Goal:** a distraction-free fullscreen experience that feels like a console — the payoff for the
 controller work already on this branch.
@@ -192,9 +225,16 @@ controller work already on this branch.
 
 ---
 
-## 4. Favorites, Recently Played, and Collections
+## 4. Favorites, Recently Played, and Collections — ✅ shipped (PR #7)
 
 **Goal:** universally expected quality-of-life organization.
+
+**Leftovers from this feature (see also findings §9):**
+- The `hidden: true` flag idea below was **not** implemented — `_remove_rom()` still
+  un-removes itself on the next rescan (finding G3).
+- Collections/remove/open-location remain mouse-only; only favorite-toggle got a MENU
+  entry (finding C1).
+- Recently Played goes stale while you sit in it (finding G4).
 
 **Files to touch**
 - `core/library.py` — entries gain `favorite: bool` (preserved by `merge_scan` automatically;
@@ -230,9 +270,11 @@ controller work already on this branch.
 
 ---
 
-## 5. Play-time tracking
+## 5. Play-time tracking — ✅ shipped (PR #6)
 
 **Goal:** log hours per game (Playnite's most-loved feature).
+Implemented as planned: `session_finished` on `LaunchCoordinator`, `MIN_PLAY_SECONDS`
+short-session guard, `_on_play_session_finished` in `main_window.py`.
 
 **Where it hooks in cleanly**
 - `LaunchCoordinator` already brackets the emulator run: `input_disabled(True)` fires at launch,
@@ -266,7 +308,7 @@ controller work already on this branch.
 
 ---
 
-## 6. Auto-detect installed emulators on first run (mostly built — finish wiring)
+## 6. Auto-detect installed emulators on first run — ✅ shipped (PR #4)
 
 **Goal:** first-run Easy Mode pre-fills emulator profiles instead of only linking downloads.
 
@@ -289,9 +331,12 @@ controller work already on this branch.
 
 ---
 
-## 7. RetroAchievements integration
+## 7. RetroAchievements integration — ⬜ open
 
 **Goal:** show achievement counts per game; a strong retro-community draw.
+The `rom_hashes()` helper in `providers/scraper.py` (CRC32/MD5 with a size cap) is a
+starting point, but note RA uses **per-console** hashing rules, not whole-file hashes,
+for several systems.
 
 **New files**
 - `providers/retroachievements.py` — client for the RetroAchievements web API
@@ -316,63 +361,48 @@ detail panel (#2b).
 
 ---
 
-## PR breakdown for parallel agent delegation
+## Remaining-work roadmap (refreshed 2026-07-20)
 
-### Base branch — read this first
+Waves A–E, F-part (1b), plus #8a all merged; the historical wave tables were removed —
+see git history (`PR #3–#11`) for what landed where. What follows is the plan for what's
+left, ordered so each wave builds on the previous one. The "Rules for every delegated PR"
+below still apply to all of it.
 
-`feat/controller-support` was merged into `main` via PR #1 (merge commit `75629da`), **but the
-merge predates the branch's final commit**: `e2f631b` ("controller-navigable on-screen keyboard
-for text search") is still only on `feat/controller-support`. The `on_search_via_keyboard` flow
-and `ui/onscreen_keyboard.py` are missing from `main` until it lands. **Merge `e2f631b` (a
-follow-up PR from the same branch) and PR 0 into `main` before fanning out agents.**
+**Wave R1 — correctness and robustness first (small, independent, high value):**
 
-### PR 0 — the `merge_scan` prerequisite (done)
+| PR | Item | Files | Effort |
+|----|------|-------|--------|
+| R1a | G1 `.bin` collision + cue/bin dedupe | `core/library.py` (scan), `data/systems.json`, tests | S–M |
+| R1b | G2 atomic JSON persistence | `core/library.py`, `core/config.py` (shared helper in `core/paths.py` or new `core/jsonio.py`), tests | S |
+| R1c | G4 Recently-Played staleness + C3 router dead code | `ui/main_window.py`, `input/router.py`, tests | S |
+| R1d | C1 controller-reachable game options | `ui/main_window.py`, `input/actions.py`, `input/router.py`, tests | M |
 
-The finished prerequisite ships as its own PR: `merge_scan` in `core/library.py`, the
-`_scan_finished` wiring in `ui/main_window.py`, and `tests/test_library.py` (8 tests, green).
-Everything below assumes it is merged.
+All four are independent of each other and of the feature work; R1a/R1b are pure-core and
+fully parallel-safe. R1c and R1d both touch `ui/main_window.py` in different functions.
 
-### Delegation waves
+**Wave R2 — the remaining headline features:**
 
-Each PR maps to one feature section above, which is the agent's context packet: goal, exact
-files, approach, pinned decisions, and tests. Agents must also read "Architectural notes" and
-the "Library entry schema" contract at the top of this document.
+| PR | Item | Depends on | Files |
+|----|------|-----------|-------|
+| R2a | #2 grid view | — (DecorationRole already done) | `ui/grid_view.py` (new), `ui/library_model.py`, `ui/main_window.py` (`_build_body`, nav) |
+| R2b | #1 leftovers: scraper settings UI + force refresh | — | `ui/settings_dialog.py`, `ui/main_window.py` (one menu entry) |
+| R2c | C2 controller status indicator | — | `input/router.py`, `ui/main_window.py` (status bar) |
 
-**Wave 1 — fully parallelizable (disjoint or near-disjoint files):**
+R2a and R2b/R2c can run in parallel (different files except trivial `main_window` spots).
 
-| PR | Feature | Files owned | Done when |
-|----|---------|-------------|-----------|
-| A | #6 auto-detect wiring | `ui/setup_wizard.py`, `ui/settings_dialog.py` (emulators page), `tests/test_setup_wizard.py` | Easy Mode offers detection results and `apply_detection` populates slots; wizard test green |
-| B | #1a scraper backend | `core/media.py` (new), `providers/scraper.py` (new), `data/scraper.json` (new), `core/paths.py`, `core/config.py` | Client fetches media/metadata against fixture JSON, cache paths + platform map tested; **no UI files touched** |
-| C | #5 play-time | `ui/launch_overlay.py`, `ui/main_window.py` (session-finished handler only), `tests/test_launch_overlay.py` | Fake start/stop delta accumulates `play_seconds`; short sessions dropped |
-| D | #4 favorites/collections | `ui/library_model.py` (proxy), `ui/main_window.py` (`_refresh_sidebar`, `_open_context_menu`, `_menu_actions`), `core/paths.py` (one line), `tests/` | Sentinel filters tested; favorite toggle reachable by mouse and via MENU |
-| E | #2b detail panel | `ui/detail_panel.py` (new), `ui/main_window.py` (`_build_body` only) | Renders bare and enriched entries; updates on selection change |
+**Wave R3 — polish and long tail:**
 
-Contention notes for Wave 1: C, D, and E all touch `ui/main_window.py` in **different functions**
-— merge in any order, rebases are trivial. B and D both add one line to `core/paths.py` —
-trivial. Nothing else overlaps.
-
-**Wave 2 — after Wave 1 merges:**
-
-| PR | Feature | Depends on | Files owned |
-|----|---------|-----------|-------------|
-| F | #2 grid view | E merged (main_window churn), B for real art (placeholders OK without) | `ui/grid_view.py` (new), `ui/library_model.py` (DecorationRole), `ui/main_window.py` (`_build_body`, nav) |
-| G | #1b scraper UI | B | `ui/main_window.py` (menu action + worker), `ui/settings_dialog.py` (credentials) |
-
-F and G both touch `ui/main_window.py`; run them in parallel only if you accept one rebase, else
-F first (it restructures `_build_body`).
-
-**Wave 3 — polish and last:**
-
-| PR | Feature | Depends on |
-|----|---------|-----------|
-| H | #3 couch mode | F (grid is the couch default) |
-| I | #7 RetroAchievements | E (panel displays counts); B's provider pattern to copy |
+| PR | Item | Depends on |
+|----|------|-----------|
+| R3a | #3 couch mode + hint bar | R2a (grid is the couch default) |
+| R3b | G3 move-resilient `merge_scan` + `hidden` flag | — |
+| R3c | #7 RetroAchievements | detail panel (done); scraper provider pattern to copy |
+| R3d | #8b auto-provision RetroArch + cores | pinned artifacts + core downloader |
 
 ### Rules for every delegated PR
 
-- Branch from `main` (post PR 0 + controller merge); one PR per row above; don't touch files
-  another in-flight wave-mate owns beyond the noted one-liners.
+- Branch from `main`; one PR per row above; don't touch files another in-flight wave-mate
+  owns beyond the noted one-liners.
 - Library entries: read every enrichment field with `.get()`; never assume presence. New fields
   survive rescans automatically via `merge_scan` — no registration step.
 - Config changes: add to `DEFAULT_CONFIG` **and** `migrate_config()` in `core/config.py`.
@@ -383,20 +413,27 @@ F first (it restructures `_build_body`).
 
 ## Effort summary
 
-| # | Feature | Effort | Key dependency |
-|---|---------|--------|----------------|
-| 0 | `merge_scan` prerequisite | ✅ done | commit it |
-| 6 | Auto-detect emulators (finish) | S | — (logic exists) |
-| 1a | Scraper backend | M–L | PR 0 |
-| 1b | Scraper UI wiring | S | 1a |
-| 2 | Cover-art grid view | M | #1 for art (placeholders OK) |
-| 2b | Detail panel | S | — (fed by 1/5/7) |
-| 3 | Couch/fullscreen mode | S–M | #2, existing window modes |
-| 4 | Favorites / collections | M | PR 0 |
-| 5 | Play-time tracking | S | PR 0, LaunchCoordinator |
-| 7 | RetroAchievements | M–L | config, #2b panel |
-| 8a | RetroArch default for controller mode | S | launch/config (done) |
-| 8b | Auto-provision RetroArch + cores | L | installer, pinned artifacts |
+| # | Feature | Effort | Status / key dependency |
+|---|---------|--------|-------------------------|
+| 0 | `merge_scan` prerequisite | — | ✅ done (PR #3) |
+| 6 | Auto-detect emulators | — | ✅ done (PR #4) |
+| 1a | Scraper backend | — | ✅ done (PR #5) |
+| 1b | Scraper UI wiring | — | ✅ done (`feat/cover-art-scraping`) |
+| 2b | Detail panel | — | ✅ done (PR #8) |
+| 4 | Favorites / collections | — | ✅ done (PR #7) |
+| 5 | Play-time tracking | — | ✅ done (PR #6) |
+| 8a | RetroArch default for controller mode | — | ✅ done (PR #11) |
+| G1 | `.bin` collision / cue-bin dedupe | S–M | open — scan correctness |
+| G2 | Atomic JSON writes | S | open — data safety |
+| G4+C3 | Recent-view staleness + router cleanup | S | open |
+| C1 | Controller-reachable game options | M | open |
+| 1-rem | Scraper settings UI + force refresh | S | open |
+| C2 | Controller status indicator | S | open |
+| 2 | Cover-art grid view | M | open — DecorationRole done |
+| 3 | Couch/fullscreen mode | S–M | open — needs #2 |
+| G3 | Move-resilient merge + `hidden` flag | S–M | open |
+| 7 | RetroAchievements | M–L | open |
+| 8b | Auto-provision RetroArch + cores | L | open — pinned artifacts |
 
 ---
 
@@ -456,3 +493,339 @@ deliberately, not fabricated.
   (fixture/opener injection like `providers/manifest.py`).
 
 **Effort:** L. **Depends on:** pinned artifacts + a core downloader.
+
+---
+
+## 9. Codebase review findings (2026-07-20)
+
+A focused review of controller handling and game management on `feat/cover-art-scraping`.
+Ordered by impact within each group. IDs (G# / C#) are referenced from the roadmap above.
+
+> **Status (2026-07-21):** G1, G3, G4, G5, C1, C2, C3, C5 are **implemented, tested, and
+> committed** on branch `fix/review-findings` (commits `cd65846`, `dc367bd`, `07f4163`,
+> `82abe0d`, `476501a`; full suite 369 green). Remaining: **G2** (atomic writes — parked
+> until the library holds stats worth protecting) and the documented non-goals **C4/C6**.
+> See §10 for the plans each change followed.
+
+### Game management
+
+**G1 — `.bin` extension collision + multi-track disc pollution (correctness bug).**
+`scan_roms()` (`core/library.py`) builds a flat `ext_to_system` dict, so an extension can
+belong to only one system — and both `psx` (`.bin`, `.cue`, `.iso`, `.img`) and `genesis`
+(`.bin`, ...) claim `.bin` in `data/systems.json`. Genesis iterates later, so **every `.bin`
+file is classified as Genesis**, including PSX disc images. Separately, a multi-track PSX
+dump (one `.cue` + N `.bin` tracks) creates N+1 library entries, all junk except the cue.
+Fix in `scan_roms`:
+- When a `.cue` exists, index the cue and **skip any `.bin`/`.img`/`.iso` it references**
+  (parse `FILE "..."` lines; cheap and offline). A standalone `.bin` with a sibling `.cue`
+  of the same stem can also be skipped without parsing.
+- For genuinely ambiguous extensions, allow `ext_to_system` to hold a list and disambiguate:
+  a `.bin` referenced by a cue or > ~16 MB is PSX; otherwise Genesis. Pin the heuristic in
+  tests. (Longer term: `.m3u` playlist support for multi-disc games.)
+
+**G2 — non-atomic JSON writes risk wiping user data (robustness).**
+`save_library`, `save_collections` (`core/library.py`) and `save_config` (`core/config.py`)
+all do `open(path, "w")` + `json.dump`. A crash or power loss mid-write (a real scenario on
+a Raspberry Pi couch box) truncates the file; on next start `load_library()` swallows the
+parse error and returns `[]`, and the next save **permanently erases favorites, play time,
+and scraped metadata**. Library writes happen constantly (every favorite toggle, every play
+session). Fix: one shared helper — write to `path.with_suffix(".tmp")`, `os.replace()` onto
+the target (atomic on Windows and POSIX), and keep a `.bak` of the last good version that
+`load_library` falls back to instead of returning `[]`.
+
+**G3 — enrichment doesn't survive file moves; removal doesn't stick.**
+`merge_scan` keys strictly by absolute path, so reorganizing a ROM folder (or renaming a
+file) silently drops that game's favorites/play time/artwork. Add a fallback match for
+entries whose path vanished: same `ext` + file size (cheap, already stat-able during scan),
+or name as a weaker tiebreak. Related: `_remove_rom()` still physically drops the entry, so
+the next rescan resurrects it — implement the `hidden: true` flag filtered out in
+`filterAcceptsRow` (idea already pinned in §4, never built). Both belong in one PR since
+both touch the scan/merge path.
+
+**G4 — Recently Played view goes stale while selected.**
+`LibraryFilterProxyModel._compute_recent()` runs only inside `set_system_filter`, i.e. when
+the sidebar row is (re)selected. Finish a play session while sitting in "Recently Played"
+and the just-played game neither appears nor re-sorts (`_on_play_session_finished` emits
+`dataChanged` but never re-filters). Fix: in `_on_play_session_finished`, if
+`self.proxy.system_key == RECENT_FILTER`, call `self.proxy.set_system_filter(RECENT_FILTER)`
+after persisting.
+
+**G5 — scan/scrape race can clobber edits (minor, guard-level fix).**
+`ScrapeWorker` snapshots `list(library)` and `_scrape_finished` replaces `self.library`
+wholesale. A rescan (or a `_remove_rom`) completing while a multi-minute scrape runs is
+overwritten when the scrape lands. Cheapest fix: disable SCAN ROMS while a scrape is
+running (mirror of the existing `scrape_btn` guard), or merge the worker's result by path
+instead of replacing the list.
+
+### Controller handling
+
+The input stack itself (`input/` + `controller_nav.py`) is in good shape: pure state
+machine, injectable clock, hysteresis, hotplug rescan, modal delegation. The gaps are all
+at the "reachability" layer above it.
+
+**C1 — context-menu actions are unreachable from the couch (biggest gap).**
+`_open_context_menu` (launch / open location / remove / favorites / collections) is
+mouse-only. From the pad, only favorite-toggle is reachable (via MENU). A kiosk user cannot
+manage collections or remove a game at all. Fix: a controller-navigable **Game Options**
+dialog reusing `MainMenuDialog`, listing the same actions the context menu offers for the
+selected game. Reaching it: the state machine's `_button_map` maps neither `BTN_FACE_WEST`
+nor `BTN_FACE_NORTH` — add `Action.OPTIONS` bound to face-west (X on Xbox), route it in
+`_on_controller_action`, and keep a MENU entry as fallback. This also gives future actions
+(e.g. "View details") a natural home.
+
+**C2 — no visible controller status.**
+`Backend.is_connected()` exists but nothing surfaces it — a dead battery or a pad that
+failed to enumerate looks identical to a working setup until buttons do nothing. Fix: the
+router checks `backend.is_connected()` on a slow cadence (every ~1 s of ticks) and emits a
+`connection_changed(bool)` signal; `MainWindow` shows a permanent status-bar indicator
+("🎮 connected" / greyed) plus a transient message on change. Headless-testable with a fake
+backend.
+
+**C3 — dead code in `ControllerRouter`.**
+`set_target()`, `route_action()`'s `_last_target` bookkeeping, and `_resolve_target()` are
+written but unused: nothing calls `set_target`, and `_last_target` is never read (modal
+delegation happens in `MainWindow._on_controller_action` instead). Either delete the
+target-resolution layer (preferred — the modal-delegation pattern won) or move the modal
+check into the router where this machinery intended it to live. Small cleanup, do it
+alongside G4's PR.
+
+**C4 — single-device assumptions (accepted, documented).**
+`SdlBackend` opens the first recognized device only; a second pad is ignored until the
+first disconnects. Fine for a frontend (menus need one navigator) — record as a
+non-goal unless multi-user profiles ever land.
+
+**C5 — verify shutdown of an in-flight launch session.**
+`closeEvent` stops the controller and cancels/waits tracked workers, but
+`LaunchCoordinator._session` (and its wait thread in `launch_session.py`) is not in
+`_workers`. Closing RetroVault while an emulator runs should be checked for a clean thread
+shutdown; if it leaks, park the session's thread handle somewhere `closeEvent` can wait on.
+
+**C6 — remapping depth is intentionally shallow (note only).**
+Only `accept_button` (south/east) is configurable. That matches the "SDL GameController
+normalizes layout" philosophy, and full remap UIs are a treadmill — but once C1 adds
+`Action.OPTIONS`, keep the pattern: semantic actions in `input/actions.py`, one config key
+per swappable pair, labels driven by config (the #3 hint bar consumes the same data).
+
+---
+
+## 10. Improvement plans (per finding)
+
+Each finding from §9 expanded into an actionable plan: the specific change, the code that
+moves, tests to add, and sequencing. Effort tags: S ≈ half-day, M ≈ 1–2 days, L ≈ 3+ days.
+All follow the "Rules for every delegated PR" above.
+
+### G1 — `.bin`/disc classification (correctness) — M
+
+**Problem recap.** `scan_roms()` flattens `config["systems"]` into a single
+`ext_to_system` dict, so the last system to claim an extension wins. `genesis` is defined
+after `psx` in `systems.json`, both list `.bin`, so **all `.bin` → Genesis**. And a
+cue/bin disc set produces one entry per track file.
+
+**Plan.**
+1. **Cue-aware pre-pass.** In `scan_roms`, collect files per directory first. For every
+   `.cue`, read it (small text file) and extract referenced data files from `FILE "<name>"
+   BINARY` lines. Build a `consumed` set of those referenced paths (resolved against the
+   cue's dir) and **exclude them** from becoming their own entries. The `.cue` itself
+   becomes the single PSX entry for that disc. Add a tiny `parse_cue_tracks(path) -> list[str]`
+   helper (pure, unit-testable, tolerant of quotes/whitespace/missing files).
+2. **Disambiguate shared extensions.** Change `ext_to_system` to map an extension to a
+   *list* of candidate system ids (preserving definition order). Resolve per file with a
+   small `classify(path, candidates)`:
+   - a `.bin` with a sibling `.cue` of the same stem, or referenced by any cue → PSX
+     (already handled by step 1's `consumed` set, so it never reaches here);
+   - a standalone `.bin` → size heuristic: `> ~24 MB` → PSX, else Genesis (Genesis carts
+     top out ~4–8 MB; PSX tracks are tens–hundreds of MB). Pin the threshold as a module
+     constant with a comment.
+   - unambiguous extensions (one candidate) skip the heuristic entirely.
+3. **Data hygiene.** Consider dropping `.bin` from `genesis` extensions in `systems.json`
+   in favor of `.md/.gen/.smd` (real Genesis dumps almost always use those); keep the
+   heuristic as the safety net for legacy `.bin` Genesis dumps. Decide in the PR; if kept,
+   the heuristic is load-bearing and must be tested both ways.
+4. **Follow-up (own PR): `.m3u` multi-disc.** Once cue handling exists, an `.m3u` playlist
+   referencing multiple cues should collapse to one entry. Note it; don't scope-creep G1.
+
+**Tests** (`tests/test_library.py`): a temp tree with `game.cue` + `game (Track 1).bin` +
+`game (Track 2).bin` yields exactly one PSX entry; a lone `sonic.bin` (4 MB) → Genesis; a
+lone `ff7.bin` (300 MB, no cue) → PSX; `parse_cue_tracks` handles quoted names, blank
+lines, and a missing referenced file without raising.
+
+**Risk (low — single-user project).** Reclassification changes the existing local library
+on the next scan, but `merge_scan` keys by path so a `.bin` that flips system keeps its
+enrichment. No migration/back-compat scaffolding needed — just rescan once after the change
+lands. Free to pick the cleaner data model (e.g. dropping `.bin` from Genesis) without
+worrying about other installs.
+
+### G2 — atomic JSON persistence (data safety) — S
+
+**Problem recap.** `save_library`/`save_collections`/`save_config` truncate-then-write; a
+mid-write crash corrupts the file and `load_library`'s bare `except` then silently returns
+`[]`, and the next save erases everything.
+
+**Plan.**
+1. Add `core/jsonio.py` with `write_json_atomic(path, data)` and
+   `read_json(path, default, *, keep_backup=True)`:
+   - write to `path.with_name(path.name + ".tmp")`, `flush()` + `os.fsync()` the handle,
+     then `os.replace(tmp, path)` (atomic on Windows and POSIX);
+   - before replacing, if `path` exists copy it to `path + ".bak"` (last-known-good);
+   - `read_json` tries `path`, and on `JSONDecodeError`/empty falls back to `path + ".bak"`,
+     logging a warning, before returning `default`.
+2. Route `save_library`, `save_collections` (`core/library.py`) and `save_config`
+   (`core/config.py`) through `write_json_atomic`; route `load_library`, `load_collections`,
+   `load_config` through `read_json`. Behavior is otherwise unchanged.
+3. Keep the existing swallow-and-default contract for a truly absent file (fresh install),
+   but **stop swallowing a corrupt primary when a good `.bak` exists**.
+
+**Tests** (`tests/test_library.py` / `tests/test_config.py`): writing then truncating the
+primary and reloading returns the `.bak` contents, not `[]`; `write_json_atomic` leaves no
+`.tmp` behind on success; a write over an existing file produces a `.bak` matching the prior
+content. Use `tmp_path` and monkeypatch the module's file constants.
+
+**Sequencing.** Deprioritized. There is no accumulated play-time/favorites/metadata to lose
+yet, so the bug currently protects nothing — its value only accrues once real stats build
+up. The fix is small and isolated (two core files + one new module), so the natural time to
+land it is **just before the library becomes worth protecting** (e.g. once play-time
+tracking has logged real hours, or right after a big scrape run), not ahead of the fun
+feature work. Cheap insurance to buy before the data exists, pointless to rush while it
+doesn't.
+
+### G3 — move-resilient merge + sticky removal — M
+
+**Problem recap.** `merge_scan` keys strictly by absolute path, so moving/renaming a ROM
+drops its enrichment; `_remove_rom` doesn't survive a rescan.
+
+**Plan.**
+1. **Fallback identity in `merge_scan`.** Primary match stays path-exact. For old entries
+   whose path is absent from the new scan, build a secondary index keyed by a cheap
+   fingerprint — `(ext, size_bytes)`, with `name.lower()` as a tiebreak. `scan_roms` must
+   start recording `size` on each entry (one `f.stat().st_size`, essentially free during the
+   walk; it's also reused by G1's heuristic). When exactly one unclaimed new entry matches a
+   dropped old entry's fingerprint, carry its enrichment over. Ambiguous matches (2+) are
+   left alone — never guess.
+2. **`hidden` flag.** `_remove_rom` sets `rom["hidden"] = True` and persists instead of
+   dropping the dict; `filterAcceptsRow` returns `False` when `rom.get("hidden")`. Because
+   the entry stays in `library.json`, `merge_scan` preserves the flag automatically and the
+   rescan no longer resurrects it. Add a "Show removed / Unhide" affordance later (out of
+   scope; the flag is the mechanism).
+3. `size` is scan-owned, so add it to `SCAN_FIELDS` so `merge_scan` treats fresh scan values
+   as authoritative.
+
+**Tests**: moving a file (new path, same ext+size) preserves `favorite`/`play_seconds`;
+two same-size files don't cross-contaminate; a `hidden` entry is filtered out and survives a
+rescan; `size` refreshes from disk on rescan.
+
+### G4 + C3 — recent-view refresh + router cleanup — S
+
+**G4 plan.** In `main_window._on_play_session_finished`, after `save_library` and the
+`dataChanged` emit, add: `if getattr(self.proxy, "system_key", "") == RECENT_FILTER:
+self.proxy.set_system_filter(RECENT_FILTER)` (re-runs `_compute_recent` + re-sorts so the
+just-played game jumps to the top live). Import `RECENT_FILTER` from `library_model`.
+Same pattern belongs in `_toggle_favorite` for the `__favorites__` view for consistency —
+it already calls `_refresh_sidebar`, but the visible table only re-filters if the sentinel
+view is re-applied; verify and fix if needed.
+
+**C3 plan.** Delete the unused target layer from `ControllerRouter`: `set_target`,
+`_target`, `_last_target`, `_resolve_target`, and reduce `route_action` to `self.action.emit(event)`
+(or inline it into `_tick`). The modal-delegation design in
+`MainWindow._on_controller_action` is the one that shipped; this machinery never wired up.
+Grep first to confirm zero external callers (there are none in-tree).
+
+**Tests**: a `RECENT_FILTER`-active proxy reflects a new `last_played` after the handler
+runs (drive with a fake `session_finished` dict); `test_router.py` still green after the
+deletion (adjust any test that referenced the removed methods).
+
+### C1 — controller-reachable Game Options — M
+
+**Problem recap.** The right-click menu (launch/open location/remove/favorite/collections)
+is mouse-only; from a pad only favorite-toggle (via MENU) works.
+
+**Plan.**
+1. **New semantic action.** Add `OPTIONS = "options"` to `Action` (`input/actions.py`). In
+   `InputStateMachine._button_map` (`input/router.py`) bind it to `BTN_FACE_WEST`
+   (`lambda b: BTN_FACE_WEST in b`) — currently unmapped, and X/□ is the natural "options"
+   button. Import `BTN_FACE_WEST` alongside the others.
+2. **Route it.** In `MainWindow._on_controller_action`, add an `elif action is
+   Action.OPTIONS:` branch that opens the options dialog for `self._selected_rom()`,
+   deferred via `QTimer.singleShot(0, ...)` exactly like `MENU` (same nested-event-loop
+   reasoning — cite that comment).
+3. **The dialog.** Add `_open_game_options()` that builds a `MainMenuDialog` (already
+   controller-navigable) from a list of `(label, callback)` for the selected game: Launch,
+   Toggle Favorite, Add to Collection ▶ (a submenu is awkward in `MainMenuDialog` — flatten
+   to "Add to <collection>" / "New collection…" entries, or push a second `MainMenuDialog`),
+   Open File Location, Remove. Reuse the existing `_toggle_favorite`, `_add_to_new_collection`,
+   `_open_location`, `_remove_rom` handlers verbatim. Run the chosen callback after the
+   dialog closes (mirror `_open_menu`).
+4. **Fallbacks.** Keep a "Game Options (selected)" entry in `_menu_actions()` so it's
+   reachable even on a pad without an X button, and keep the mouse context menu.
+5. **Discoverability.** Feeds directly into #3's hint bar ("X: Options"); until then, a
+   status-bar hint on first selection is enough.
+
+**Tests** (`tests/test_main_window_nav.py` or a new `test_game_options.py`, headless): an
+`Action.OPTIONS` event with a row selected opens the dialog (patch `exec`); each callback
+mutates the right entry; no-selection shows the "No ROM selected" message and opens nothing.
+Add a state-machine test that a `BTN_FACE_WEST` press emits `Action.OPTIONS`.
+
+### C2 — controller connection indicator — S
+
+**Plan.**
+1. **Signal from the router.** `ControllerRouter` gains `connection_changed = Signal(bool)`.
+   In `_tick`, every ~80 ticks (~1 s at 12 ms) call `self._backend.is_connected()`; when it
+   differs from the last seen value, emit. Emit an initial state on `start()`. Keep the
+   cadence coarse — `is_connected` is cheap but not free, and status doesn't need per-tick
+   resolution.
+2. **UI.** `MainWindow._build_controller` connects it to `_on_controller_connection(bool)`:
+   set a permanent status-bar `QLabel` ("🎮" solid vs. greyed with a "no controller"
+   tooltip) and flash a 3 s transient message on change. When `self.controller is None`
+   (build failed / disabled), show the greyed state.
+3. Respect `controller.enabled == False`: hide the indicator entirely rather than showing
+   "disconnected".
+
+**Tests**: a fake backend flipping `is_connected` drives `connection_changed` after the
+cadence threshold (advance the fake clock / call `_tick` N times); the label reflects state.
+No real hardware.
+
+### C5 — clean launch-session shutdown on close — S
+
+**Plan.** Make an in-flight emulator session joinable at close. Options, cheapest first:
+1. Have `LaunchCoordinator` expose the active `LaunchSession` (it holds `self._session`),
+   and in `MainWindow.closeEvent`, if a session is active, hide behavior is fine — but the
+   `_WaitThread` inside `LaunchSession` should be asked to finish. Since it blocks on
+   `proc.wait()`, add `LaunchSession.shutdown(timeout_ms)` that, if a thread exists, calls
+   `self._thread.wait(timeout_ms)` (the emulator is the child; we don't kill it, we just
+   detach cleanly) and `deleteLater`s it.
+2. `closeEvent` calls `self.launch_coordinator.shutdown()` (new pass-through) before
+   accepting. Guard for `launch_coordinator is None`.
+
+This is a correctness/hygiene fix, not user-facing; verify with a test that constructs a
+coordinator with a fake session whose thread ends promptly and asserts `closeEvent` returns
+without leaving a running `QThread` (`thread.isRunning()` is `False`). Keep it best-effort —
+never block close for more than the timeout.
+
+### C4 / C6 — documented non-goals
+
+No code. Record in `docs/` (or a `## Non-goals` note): single-navigator device selection is
+intentional; deep remapping is deliberately shallow. Revisit only if multi-user profiles or
+a remap UI are ever prioritized. Listed here so they aren't rediscovered as "bugs".
+
+### G5 — scan/scrape race guard — S
+
+**Plan.** Two-part, pick per taste:
+- **Minimal:** disable the SCAN ROMS button (and the add-rom-dir path that triggers a scan)
+  while `self._scrape_worker is not None`, mirroring the existing `scrape_btn` disable, and
+  re-enable in `_scrape_cleanup`. Symmetric guard, ~4 lines.
+- **Better:** make `_scrape_finished` merge by path onto the *current* `self.library`
+  (re-read, don't trust the pre-scrape snapshot) so a concurrent rescan/removal isn't lost:
+  build `{path: entry}` from `self.library`, overlay the worker's `media`/`metadata` onto
+  matching live entries, drop results for paths no longer present.
+
+**Tests**: mutating `self.library` (simulating a rescan) during a scrape and then delivering
+`finished_library` preserves the concurrent change (better path), or the guard prevents the
+concurrent scan from starting (minimal path).
+
+### Suggested sequencing
+
+1. **G2** (data safety) — protects everything else, isolated.
+2. **G1** (scan correctness) — also lands `size` on entries, which **G3** reuses.
+3. **G4+C3**, **G5** — small, independent hygiene.
+4. **C1**, **C2** — controller reachability, the couch-experience payoff.
+5. **G3**, **C5** — robustness once the above stabilizes.
+6. Feature waves (#2 grid, #3 couch, #7 RA, #8b provisioning) resume from the roadmap.

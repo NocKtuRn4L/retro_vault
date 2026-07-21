@@ -103,6 +103,33 @@ class LaunchSession(QObject):
             return False
         return self._proc.poll() is None
 
+    def shutdown(self, timeout_ms=3000):
+        """Detach cleanly from an in-flight launch when the app is closing.
+
+        Does NOT kill the emulator (it is the child the user may still be
+        playing); it only makes sure our observer :class:`_WaitThread` is not left
+        running as the window tears down. Waits up to ``timeout_ms`` for a session
+        that is finishing anyway; if the emulator is genuinely still running the
+        wait times out and we stop delivering the thread's signals so it cannot
+        call into objects being destroyed. Returns ``True`` if the wait completed.
+        """
+        thread = self._thread
+        if thread is None:
+            return True
+        try:
+            finished = bool(thread.wait(timeout_ms))
+        except Exception:  # pragma: no cover - defensive
+            finished = False
+        if not finished:
+            # Still running: sever the connections so the eventual exit signal
+            # doesn't reach a half-torn-down session.
+            for signal in (thread.finished_code, thread.finished):
+                try:
+                    signal.disconnect()
+                except (RuntimeError, TypeError):  # pragma: no cover - nothing connected
+                    pass
+        return finished
+
     def _on_exit(self, code):
         self._proc = None
         self.exited.emit(code)

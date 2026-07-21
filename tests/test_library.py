@@ -57,6 +57,43 @@ class MergeScanTests(unittest.TestCase):
         merged = library.merge_scan(old, new)
         self.assertEqual(len(merged), 1)
 
+    def test_preserves_enrichment_across_a_move(self):
+        # Same file, new path (moved/renamed): matched by (ext, size) fingerprint.
+        old = [self._entry("/roms/old/mario.nes", size=1024, favorite=True, play_seconds=99)]
+        new = [self._entry("/roms/new/mario.nes", size=1024)]
+        merged = library.merge_scan(old, new)
+        self.assertEqual(merged[0]["path"], "/roms/new/mario.nes")
+        self.assertTrue(merged[0]["favorite"])
+        self.assertEqual(merged[0]["play_seconds"], 99)
+
+    def test_ambiguous_fingerprint_does_not_cross_contaminate(self):
+        # Two moved files with identical (ext, size): don't guess — drop enrichment.
+        old = [
+            self._entry("/roms/a.nes", size=2048, favorite=True),
+            self._entry("/roms/b.nes", size=2048, play_seconds=50),
+        ]
+        new = [
+            self._entry("/roms/x.nes", size=2048),
+            self._entry("/roms/y.nes", size=2048),
+        ]
+        merged = library.merge_scan(old, new)
+        for entry in merged:
+            self.assertNotIn("favorite", entry)
+            self.assertNotIn("play_seconds", entry)
+
+    def test_move_match_requires_a_size(self):
+        # Without a size the fingerprint is too weak; a moved file loses enrichment.
+        old = [self._entry("/roms/old/mario.nes", favorite=True)]  # no size
+        new = [self._entry("/roms/new/mario.nes")]
+        merged = library.merge_scan(old, new)
+        self.assertNotIn("favorite", merged[0])
+
+    def test_hidden_flag_survives_rescan(self):
+        old = [self._entry("/roms/mario.nes", size=10, hidden=True)]
+        new = [self._entry("/roms/mario.nes", size=10)]
+        merged = library.merge_scan(old, new)
+        self.assertTrue(merged[0]["hidden"])
+
 
 class ScanRomsTests(unittest.TestCase):
     def _config(self, rom_dir):
@@ -106,6 +143,82 @@ class ScanRomsTests(unittest.TestCase):
 
             self.assertTrue(merged[0]["favorite"])
             self.assertEqual(merged[0]["play_seconds"], 120)
+
+    def test_scan_records_file_size(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "mario.nes").write_bytes(b"abcde")
+            lib = library.scan_roms(self._config(root))
+            self.assertEqual(lib[0]["size"], 5)
+
+
+class DiscClassificationTests(unittest.TestCase):
+    """G1: .bin collision (PSX vs Genesis) and cue/bin disc de-duplication."""
+
+    def _config(self, rom_dir):
+        # Order matters: psx is defined before genesis, so both claim .bin and
+        # the classifier — not definition order — must decide.
+        return {
+            "rom_dirs": [str(rom_dir)],
+            "systems": {
+                "psx": {"extensions": [".bin", ".cue", ".iso", ".img"]},
+                "genesis": {"extensions": [".md", ".bin", ".gen", ".smd"]},
+            },
+        }
+
+    def test_cue_owns_its_bin_tracks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "FF7 (Disc 1).cue").write_text(
+                'FILE "FF7 (Disc 1) (Track 1).bin" BINARY\n'
+                '  TRACK 01 MODE2/2352\n'
+                'FILE "FF7 (Disc 1) (Track 2).bin" BINARY\n'
+                '  TRACK 02 AUDIO\n'
+            )
+            (root / "FF7 (Disc 1) (Track 1).bin").write_bytes(b"x")
+            (root / "FF7 (Disc 1) (Track 2).bin").write_bytes(b"x")
+
+            lib = library.scan_roms(self._config(root))
+
+            # Exactly one entry — the .cue — not one per track file.
+            self.assertEqual(len(lib), 1)
+            self.assertEqual(lib[0]["ext"], ".cue")
+            self.assertEqual(lib[0]["system"], "psx")
+
+    def test_standalone_small_bin_is_genesis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "sonic.bin").write_bytes(b"x" * 1024)  # tiny cart
+            lib = library.scan_roms(self._config(root))
+            self.assertEqual(len(lib), 1)
+            self.assertEqual(lib[0]["system"], "genesis")
+
+    def test_standalone_large_bin_is_psx(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            big = root / "loose_track.bin"
+            with open(big, "wb") as f:
+                f.truncate(library._DISC_SIZE_THRESHOLD + 1)  # sparse; no real disk cost
+            lib = library.scan_roms(self._config(root))
+            self.assertEqual(len(lib), 1)
+            self.assertEqual(lib[0]["system"], "psx")
+
+    def test_parse_cue_tracks_tolerates_junk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cue = Path(tmp) / "game.cue"
+            cue.write_text(
+                '\n'
+                'REM some comment\n'
+                'FILE "track.bin" BINARY\n'
+                '   \n'
+                'file "lower.iso" binary\n'  # case-insensitive
+            )
+            names = library.parse_cue_tracks(cue)
+            self.assertEqual(names, ["track.bin", "lower.iso"])
+
+    def test_parse_cue_tracks_missing_file(self):
+        # A path that does not exist must return [] rather than raise.
+        self.assertEqual(library.parse_cue_tracks(Path("/no/such/file.cue")), [])
 
 
 if __name__ == "__main__":

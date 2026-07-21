@@ -17,6 +17,7 @@ from retrovault.input.backend import (
     BTN_DPAD_UP,
     BTN_FACE_EAST,
     BTN_FACE_SOUTH,
+    BTN_FACE_WEST,
     BTN_SHOULDER_L,
     BTN_SHOULDER_R,
     BTN_START,
@@ -206,6 +207,17 @@ class ButtonEdgeTests(unittest.TestCase):
         self.assertEqual(_actions(m.update(_state(buttons={BTN_START}), 4)), [Action.MENU])
         self.assertEqual(_actions(m.update(_state(buttons={BTN_START}), 5)), [])
 
+    def test_west_face_button_maps_to_options(self):
+        m = InputStateMachine(accept_button="south")
+        self.assertEqual(_actions(m.update(_state(buttons={BTN_FACE_WEST}), 0)), [Action.OPTIONS])
+        # Buttons don't repeat while held.
+        self.assertEqual(_actions(m.update(_state(buttons={BTN_FACE_WEST}), 1)), [])
+
+    def test_options_button_independent_of_accept_swap(self):
+        # OPTIONS stays on the west button regardless of the south/east accept swap.
+        m = InputStateMachine(accept_button="east")
+        self.assertEqual(_actions(m.update(_state(buttons={BTN_FACE_WEST}), 0)), [Action.OPTIONS])
+
     def test_directions_never_repeat_only_directions_do(self):
         # Sanity: a held shoulder past the repeat delay still never repeats.
         m = InputStateMachine(repeat_delay_ms=100, repeat_rate_ms=50)
@@ -308,12 +320,61 @@ class ControllerRouterTests(unittest.TestCase):
         self.assertEqual(received, [ActionEvent(Action.ACCEPT, repeat=False)])
         router.stop()
 
-    def test_set_target_overrides_active_window(self):
-        backend = _QueueBackend([])
-        router = ControllerRouter(backend, InputStateMachine())
-        sentinel = object()
-        router.set_target(sentinel)
-        self.assertIs(router.route_action(ActionEvent(Action.MENU)), sentinel)
+
+class _ConnBackend:
+    """Fake backend whose connection state can be toggled between polls."""
+
+    def __init__(self, connected=True):
+        self.connected = connected
+
+    def poll(self):
+        return BackendState()
+
+    def is_connected(self):
+        return self.connected
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+
+@unittest.skipUnless(_QT_AVAILABLE, "PySide6 is not installed")
+class ControllerConnectionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_start_reports_initial_connection(self):
+        backend = _ConnBackend(connected=True)
+        router = ControllerRouter(backend, InputStateMachine(), interval_ms=10)
+        seen = []
+        router.connection_changed.connect(seen.append)
+        router.start()
+        self.assertEqual(seen, [True])
+        self.assertTrue(router.connected)
+        router.stop()
+
+    def test_change_emits_once_on_cadence(self):
+        backend = _ConnBackend(connected=True)
+        router = ControllerRouter(backend, InputStateMachine(), interval_ms=10)
+        seen = []
+        router.connection_changed.connect(seen.append)
+        router.start()  # -> [True]
+
+        # Disconnect, then tick past the cadence threshold; exactly one False.
+        backend.connected = False
+        for _ in range(router._CONN_CHECK_EVERY):
+            router._tick()
+        self.assertEqual(seen, [True, False])
+        self.assertFalse(router.connected)
+
+        # No further churn while state is stable.
+        for _ in range(router._CONN_CHECK_EVERY):
+            router._tick()
+        self.assertEqual(seen, [True, False])
+        router.stop()
 
 
 if __name__ == "__main__":

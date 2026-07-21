@@ -46,7 +46,12 @@ from ..input.router import ControllerRouter, InputStateMachine
 from ..input.sdl_backend import SdlBackend
 from .detail_panel import DetailPanel
 from .launch_overlay import MIN_PLAY_SECONDS, LaunchCoordinator
-from .library_model import BOXART_THUMB, LibraryFilterProxyModel, LibraryModel
+from .library_model import (
+    BOXART_THUMB,
+    RECENT_FILTER,
+    LibraryFilterProxyModel,
+    LibraryModel,
+)
 from .main_menu import MainMenuDialog
 from .onscreen_keyboard import OnScreenKeyboard
 from .scrape_worker import ScrapeWorker
@@ -99,6 +104,8 @@ class MainWindow(QMainWindow):
         self.controller = None
         self._controller_busy = False
         self._menu_open = False
+        # Last controller connection state shown in the status bar (C2).
+        self._last_controller_connected = None
         # Which column controller Up/Down navigates: "systems" or "games".
         self._nav_column = "games"
 
@@ -185,10 +192,12 @@ class MainWindow(QMainWindow):
             machine = InputStateMachine.from_config(self.config_data["controller"])
             self.controller = ControllerRouter(backend, machine, parent=self)
             self.controller.action.connect(self._on_controller_action)
+            self.controller.connection_changed.connect(self._on_controller_connection)
             self.controller.start()
         except Exception as exc:  # pragma: no cover - defensive; never crash UI
             logger.warning("Controller input disabled: %s: %s", type(exc).__name__, exc)
             self.controller = None
+            self._on_controller_connection(False)
 
     def _build_top_bar(self):
         top_bar = QWidget()
@@ -225,10 +234,10 @@ class MainWindow(QMainWindow):
         self.scrape_btn.clicked.connect(self.on_scrape_artwork)
         layout.addWidget(self.scrape_btn)
 
-        scan_roms_btn = QPushButton("SCAN ROMS")
-        scan_roms_btn.setProperty("accent", "true")
-        scan_roms_btn.clicked.connect(self.on_scan_roms)
-        layout.addWidget(scan_roms_btn)
+        self.scan_btn = QPushButton("SCAN ROMS")
+        self.scan_btn.setProperty("accent", "true")
+        self.scan_btn.clicked.connect(self.on_scan_roms)
+        layout.addWidget(self.scan_btn)
 
         return top_bar
 
@@ -330,10 +339,38 @@ class MainWindow(QMainWindow):
 
     def _build_status_bar(self):
         self.statusBar().showMessage("Welcome to RetroVault")
+        # Controller connection indicator (C2): a solid pad glyph when a
+        # controller is connected, greyed (disabled) when none is detected, and
+        # hidden entirely when controller support is disabled in config.
+        self.controller_indicator = QLabel("")
+        self.controller_indicator.setObjectName("controllerIndicator")
+        self.controller_indicator.setVisible(False)
+        self.statusBar().addPermanentWidget(self.controller_indicator)
         self.count_label = QLabel("")
         self.count_label.setObjectName("countLabel")
         self.statusBar().addPermanentWidget(self.count_label)
         self._update_count_label()
+
+    def _on_controller_connection(self, connected):
+        """Reflect controller connect/disconnect state in the status bar (C2)."""
+        label = getattr(self, "controller_indicator", None)
+        if label is None:
+            return
+        if not self.config_data.get("controller", {}).get("enabled", True):
+            label.setVisible(False)
+            return
+        label.setVisible(True)
+        label.setText("🎮")
+        # A disabled QLabel renders greyed, which reads well as "no controller".
+        label.setEnabled(bool(connected))
+        label.setToolTip("Controller connected" if connected else "No controller detected")
+        # Flash a transient note only on a genuine change, not the initial report.
+        prev = getattr(self, "_last_controller_connected", None)
+        if prev is not None and bool(connected) != prev:
+            self.statusBar().showMessage(
+                "Controller connected" if connected else "Controller disconnected", 3000
+            )
+        self._last_controller_connected = bool(connected)
 
     def _build_shortcuts(self):
         focus_search = QShortcut(QKeySequence("Ctrl+F"), self)
@@ -458,6 +495,10 @@ class MainWindow(QMainWindow):
             # just opened. singleShot(0) lets this tick return first so polling
             # continues inside the dialog's nested event loop.
             QTimer.singleShot(0, self._open_menu)
+        elif action is Action.OPTIONS:
+            # Per-game options for the selected ROM. Deferred for the same
+            # nested-event-loop reason as MENU above.
+            QTimer.singleShot(0, self._open_game_options)
 
     def _nav_move(self, delta):
         """Move selection by ``delta`` within the active column (systems/games)."""
@@ -537,6 +578,7 @@ class MainWindow(QMainWindow):
             ("Scan ROMs", self.on_scan_roms),
             ("Add ROM Folder", self.on_add_rom_dir),
             ("Scrape Artwork", self.on_scrape_artwork),
+            ("Game Options (selected game)", self._open_game_options),
             ("Toggle Favorite (selected game)", self._toggle_favorite_selected),
             ("Setup Wizard", self.on_setup),
             ("Settings", self.on_settings),
@@ -571,6 +613,79 @@ class MainWindow(QMainWindow):
         if chose and 0 <= index < len(actions):
             actions[index][1]()
 
+    def _game_options_actions(self, rom):
+        """(label, callback) rows for the selected game's options menu.
+
+        Mirrors the mouse context menu (`_open_context_menu`) so the same actions
+        are reachable from a controller. Reuses the existing handlers verbatim.
+        """
+        fav_label = "Remove from Favorites" if rom.get("favorite") else "Add to Favorites"
+        return [
+            ("Launch", self.on_launch_selected),
+            (fav_label, lambda: self._toggle_favorite(rom)),
+            ("Add to Collection…", lambda: self._open_collection_menu(rom)),
+            ("Open File Location", lambda: self._open_location(rom)),
+            ("Remove from Library", lambda: self._remove_rom(rom)),
+        ]
+
+    def _open_game_options(self):
+        """OPTIONS (or MENU fallback): controller-navigable per-game actions.
+
+        The mouse context menu is unreachable from a pad; this exposes the same
+        actions for the selected ROM via the gamepad-navigable ``MainMenuDialog``.
+        """
+        if self._menu_open:
+            return
+        rom = self._selected_rom()
+        if not rom:
+            self.statusBar().showMessage("No ROM selected", 3000)
+            return
+        self._menu_open = True
+        try:
+            actions = self._game_options_actions(rom)
+            dialog = MainMenuDialog([label for label, _ in actions], self)
+            dialog.setWindowTitle(rom.get("name", "Game"))
+            chose = dialog.exec() == QDialog.DialogCode.Accepted
+            index = dialog.chosen_index
+        finally:
+            self._menu_open = False
+        if chose and 0 <= index < len(actions):
+            actions[index][1]()
+
+    def _open_collection_menu(self, rom):
+        """Second-level controller menu: add/remove the game in a collection.
+
+        Lists "New Collection…" plus each existing collection (✓ when the game is
+        already a member); routes the choice to the same handlers the mouse
+        submenu uses.
+        """
+        if self._menu_open:
+            return
+        collections = self._get_collections()
+        names = [c.get("name", "") for c in collections if c.get("name")]
+        path = rom.get("path")
+        labels = ["New Collection…"]
+        for name in names:
+            member = any(
+                c.get("name") == name and path in (c.get("paths", []) or [])
+                for c in collections
+            )
+            labels.append(("✓ " if member else "") + name)
+        self._menu_open = True
+        try:
+            dialog = MainMenuDialog(labels, self)
+            dialog.setWindowTitle("Add to Collection")
+            chose = dialog.exec() == QDialog.DialogCode.Accepted
+            index = dialog.chosen_index
+        finally:
+            self._menu_open = False
+        if not chose:
+            return
+        if index == 0:
+            self._add_to_new_collection(rom)
+        elif 1 <= index <= len(names):
+            self._toggle_collection_membership(rom, names[index - 1])
+
     def _selected_rom(self):
         indexes = self.table.selectionModel().selectedRows()
         if not indexes:
@@ -599,10 +714,13 @@ class MainWindow(QMainWindow):
 
     def _refresh_sidebar(self):
         selected = self.sidebar.currentItem().data(Qt.ItemDataRole.UserRole) if self.sidebar.currentItem() else ""
+        # Hidden (removed) games are excluded from every count so the sidebar
+        # totals match what the table actually shows.
+        visible = [rom for rom in self.library if not rom.get("hidden")]
         counts = {}
-        for rom in self.library:
+        for rom in visible:
             counts[rom.get("system", "")] = counts.get(rom.get("system", ""), 0) + 1
-        favorite_count = sum(1 for rom in self.library if rom.get("favorite"))
+        favorite_count = sum(1 for rom in visible if rom.get("favorite"))
         collections = self._get_collections()
         # Keep the proxy's collection membership in sync with the sidebar.
         self.proxy.set_collections(collections)
@@ -629,7 +747,7 @@ class MainWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, f"collection:{name}")
             self.sidebar.addItem(item)
 
-        all_item = QListWidgetItem(f"ALL GAMES ({len(self.library)})")
+        all_item = QListWidgetItem(f"ALL GAMES ({len(visible)})")
         all_item.setData(Qt.ItemDataRole.UserRole, "")
         self.sidebar.addItem(all_item)
         selected_row = self.sidebar.count() - 1  # default: ALL GAMES
@@ -669,7 +787,7 @@ class MainWindow(QMainWindow):
 
     def _update_count_label(self):
         shown = self.proxy.rowCount() if hasattr(self, "proxy") else len(self.library)
-        total = len(self.library)
+        total = sum(1 for rom in self.library if not rom.get("hidden"))
         self.count_label.setText(f"{shown} / {total} ROMs" if total else "")
 
     def _open_context_menu(self, pos):
@@ -781,8 +899,12 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
 
     def _remove_rom(self, rom):
-        self._refresh_library([item for item in self.library if item.get("path") != rom.get("path")])
+        # Flag as hidden rather than dropping the entry: a dropped entry is
+        # re-added by the next rescan, whereas a hidden flag is preserved by
+        # merge_scan so the removal sticks. filterAcceptsRow hides it from views.
+        rom["hidden"] = True
         save_library(self.library)
+        self._refresh_library(self.library)
         self.statusBar().showMessage("Removed from library", 3000)
 
     def _track_worker(self, worker):
@@ -793,6 +915,13 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self.controller:
             self.controller.stop()
+        # Detach cleanly from an emulator session still being observed, so its
+        # wait-thread isn't destroyed mid-run as the window tears down (C5).
+        if self.launch_coordinator is not None:
+            try:
+                self.launch_coordinator.shutdown()
+            except Exception:  # pragma: no cover - close must never fail
+                pass
         for worker in self._workers:
             # A scrape worker runs a blocking network loop; ask it to stop at the
             # next entry so close doesn't hang or leave the thread running.
@@ -856,6 +985,10 @@ class MainWindow(QMainWindow):
         if getattr(self, "_scrape_worker", None) is not None:
             return  # a scrape is already running
         self.scrape_btn.setEnabled(False)
+        # Block a concurrent rescan while the (multi-minute) scrape runs so the
+        # two don't fight over self.library. The scrape result is also merged by
+        # path (see _scrape_finished) as a second line of defence.
+        self.scan_btn.setEnabled(False)
         self.statusBar().showMessage("Scraping artwork…")
         worker = ScrapeWorker(self.library, self.config_data, parent=self)
         self._scrape_worker = worker
@@ -868,11 +1001,34 @@ class MainWindow(QMainWindow):
     def _scrape_progress(self, done, total):
         self.statusBar().showMessage(f"Scraping artwork… {done}/{total}")
 
-    def _scrape_finished(self, library):
-        save_library(library)
-        self._refresh_library(library)
-        covers = sum(1 for rom in library if (rom.get("media") or {}).get("boxart"))
+    def _scrape_finished(self, updated):
+        # Merge the scraped media/metadata onto the CURRENT library by path rather
+        # than replacing it wholesale: the worker ran against a snapshot taken when
+        # the scrape started, so a rescan or removal that landed meanwhile must not
+        # be lost. Paths no longer present are simply skipped.
+        merged = self._merge_scrape_result(updated)
+        save_library(merged)
+        self._refresh_library(merged)
+        covers = sum(1 for rom in merged if (rom.get("media") or {}).get("boxart"))
         self.statusBar().showMessage(f"Artwork updated — {covers} covers", 5000)
+
+    def _merge_scrape_result(self, updated):
+        """Overlay scraped ``media``/``metadata`` from ``updated`` onto ``self.library``.
+
+        Matched by path; entries in ``updated`` whose path is gone from the live
+        library are dropped, and live entries the scrape didn't touch are left as-is.
+        Returns ``self.library`` (mutated in place) for the caller to persist.
+        """
+        by_path = {e.get("path"): e for e in (updated or []) if e.get("path") is not None}
+        for entry in self.library:
+            scraped = by_path.get(entry.get("path"))
+            if not scraped:
+                continue
+            if scraped.get("media"):
+                entry["media"] = scraped["media"]
+            if scraped.get("metadata"):
+                entry["metadata"] = scraped["metadata"]
+        return self.library
 
     def _scrape_failed(self, msg):
         QMessageBox.warning(self, "Scrape Artwork", msg)
@@ -881,6 +1037,7 @@ class MainWindow(QMainWindow):
         worker = getattr(self, "_scrape_worker", None)
         self._scrape_worker = None
         self.scrape_btn.setEnabled(True)
+        self.scan_btn.setEnabled(True)
         if worker is not None:
             worker.deleteLater()
 
@@ -990,6 +1147,13 @@ class MainWindow(QMainWindow):
             top_left = self.model.index(row, 0)
             bottom_right = self.model.index(row, self.model.columnCount() - 1)
             self.model.dataChanged.emit(top_left, bottom_right)
+            # "Recently Played" is computed once when the view is selected, so a
+            # session that finishes while sitting in that view would otherwise not
+            # surface or re-sort the just-played game. Re-apply the filter to
+            # recompute + re-order it live.
+            proxy = getattr(self, "proxy", None)
+            if proxy is not None and getattr(proxy, "system_key", "") == RECENT_FILTER:
+                proxy.set_system_filter(RECENT_FILTER)
             break
 
     def _on_launch_session_failed(self, message):

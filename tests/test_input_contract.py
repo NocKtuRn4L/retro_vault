@@ -15,12 +15,13 @@ class ActionEnumTests(unittest.TestCase):
             "ACCEPT": "accept",
             "BACK": "back",
             "MENU": "menu",
+            "OPTIONS": "options",
             "PREV_SYSTEM": "previous_system",
             "NEXT_SYSTEM": "next_system",
         }
         actual = {member.name: member.value for member in Action}
         self.assertEqual(actual, expected)
-        self.assertEqual(len(list(Action)), 9)
+        self.assertEqual(len(list(Action)), 10)
 
     def test_action_event_is_frozen_and_defaults_repeat_false(self):
         event = ActionEvent(Action.UP)

@@ -204,6 +204,22 @@ class LaunchCoordinator(QObject):
         if restore_view is not None:
             self._restore_view = restore_view
 
+    def shutdown(self, timeout_ms=3000):
+        """Ask an in-flight session to detach cleanly (called on window close).
+
+        No-op when no session is active. Never raises.
+        """
+        session = self._session
+        if session is None:
+            return True
+        shutdown = getattr(session, "shutdown", None)
+        if not callable(shutdown):
+            return True
+        try:
+            return shutdown(timeout_ms)
+        except Exception:  # pragma: no cover - defensive; close must not fail
+            return False
+
     def launch(self, rom, config):
         """Begin launching ``rom`` with ``config``, covering the UI in black."""
         # Snapshot the view before anything changes, then cover + disable input.

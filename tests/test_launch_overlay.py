@@ -36,6 +36,18 @@ class FakeSession(QObject):
         self.launch_calls.append((rom, config))
 
 
+class FakeShutdownSession(FakeSession):
+    """FakeSession that also records shutdown() calls (for C5 coordinator test)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.shutdown_calls = []
+
+    def shutdown(self, timeout_ms=3000):
+        self.shutdown_calls.append(timeout_ms)
+        return True
+
+
 @unittest.skipUnless(PYSIDE6_AVAILABLE, "PySide6 is not installed")
 class LaunchOverlayTests(unittest.TestCase):
     @classmethod
@@ -214,6 +226,26 @@ class LaunchCoordinatorTests(unittest.TestCase):
             self.assertEqual(events["failed"], ["boom"])
             self.assertEqual(events["input_disabled"], [True, False])
             self.assertEqual(events["finished"], 0)
+        finally:
+            host.close()
+
+    # ── shutdown pass-through (C5) ────────────────────────────────────────────
+    def test_shutdown_without_active_session_is_noop(self):
+        host, _session, coord, _events = self._make_coordinator()
+        try:
+            self.assertTrue(coord.shutdown())  # nothing launched
+        finally:
+            host.close()
+
+    def test_shutdown_delegates_to_active_session(self):
+        host = QWidget()
+        host.resize(400, 300)
+        session = FakeShutdownSession()
+        coord = LaunchCoordinator(host, session_factory=lambda: session)
+        try:
+            coord.launch({"path": "/x"}, {})
+            self.assertTrue(coord.shutdown(timeout_ms=1234))
+            self.assertEqual(session.shutdown_calls, [1234])
         finally:
             host.close()
 
