@@ -214,7 +214,6 @@ class InputStateMachine:
 # ── Qt driver ─────────────────────────────────────────────────────────────────
 try:
     from PySide6.QtCore import QObject, Qt, QTimer, Signal
-    from PySide6.QtWidgets import QApplication
 
     _QT_AVAILABLE = True
 except ImportError:  # pragma: no cover - exercised only without PySide6
@@ -227,9 +226,9 @@ if _QT_AVAILABLE:
         """Poll a backend on a timer and re-emit action events for the UI.
 
         The ``action`` signal carries an :class:`ActionEvent` (payload type
-        ``object`` so PySide6 does not try to marshal the dataclass). Windows and
-        dialogs connect to it in later PRs; this class does not perform per-widget
-        navigation itself.
+        ``object`` so PySide6 does not try to marshal the dataclass). The active
+        window / modal owns routing each event (see
+        ``MainWindow._on_controller_action``); this class only polls and emits.
         """
 
         # Emitted for every event the state machine produces. Payload: ActionEvent.
@@ -247,8 +246,6 @@ if _QT_AVAILABLE:
             self._backend = backend
             self._machine = machine
             self._interval_ms = int(interval_ms)
-            self._target = None
-            self._last_target = None
             self._running = False
             self._paused = False
 
@@ -300,29 +297,6 @@ if _QT_AVAILABLE:
         def paused(self) -> bool:
             return self._paused
 
-        # ── Routing ──────────────────────────────────────────────────────────
-        def set_target(self, widget) -> None:
-            """Set an explicit routing target, overriding the active-window lookup."""
-            self._target = widget
-
-        def _resolve_target(self):
-            if self._target is not None:
-                return self._target
-            app = QApplication.instance()
-            if app is None:
-                return None
-            return (
-                QApplication.activeModalWidget()
-                or QApplication.activePopupWidget()
-                or QApplication.activeWindow()
-            )
-
-        def route_action(self, event: ActionEvent):
-            """Emit ``event`` and record the surface it is destined for."""
-            self.action.emit(event)
-            self._last_target = self._resolve_target()
-            return self._last_target
-
         # ── Timer tick ───────────────────────────────────────────────────────
         @staticmethod
         def _now_ms() -> float:
@@ -333,7 +307,7 @@ if _QT_AVAILABLE:
                 return
             state = self._backend.poll()
             for event in self._machine.update(state, self._now_ms()):
-                self.route_action(event)
+                self.action.emit(event)
 
 else:  # pragma: no cover - stub used only when PySide6 is unavailable
 

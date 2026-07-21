@@ -46,7 +46,12 @@ from ..input.router import ControllerRouter, InputStateMachine
 from ..input.sdl_backend import SdlBackend
 from .detail_panel import DetailPanel
 from .launch_overlay import MIN_PLAY_SECONDS, LaunchCoordinator
-from .library_model import BOXART_THUMB, LibraryFilterProxyModel, LibraryModel
+from .library_model import (
+    BOXART_THUMB,
+    RECENT_FILTER,
+    LibraryFilterProxyModel,
+    LibraryModel,
+)
 from .main_menu import MainMenuDialog
 from .onscreen_keyboard import OnScreenKeyboard
 from .scrape_worker import ScrapeWorker
@@ -990,6 +995,13 @@ class MainWindow(QMainWindow):
             top_left = self.model.index(row, 0)
             bottom_right = self.model.index(row, self.model.columnCount() - 1)
             self.model.dataChanged.emit(top_left, bottom_right)
+            # "Recently Played" is computed once when the view is selected, so a
+            # session that finishes while sitting in that view would otherwise not
+            # surface or re-sort the just-played game. Re-apply the filter to
+            # recompute + re-order it live.
+            proxy = getattr(self, "proxy", None)
+            if proxy is not None and getattr(proxy, "system_key", "") == RECENT_FILTER:
+                proxy.set_system_filter(RECENT_FILTER)
             break
 
     def _on_launch_session_failed(self, message):

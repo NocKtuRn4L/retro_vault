@@ -14,7 +14,11 @@ try:
 
     from retrovault.ui import main_window as main_window_module
     from retrovault.ui.launch_overlay import MIN_PLAY_SECONDS
-    from retrovault.ui.library_model import LibraryModel
+    from retrovault.ui.library_model import (
+        RECENT_FILTER,
+        LibraryFilterProxyModel,
+        LibraryModel,
+    )
     from retrovault.ui.main_window import MainWindow
 
     PYSIDE6_AVAILABLE = True
@@ -28,6 +32,8 @@ class _StubHost:
     def __init__(self, library):
         self.library = library
         self.model = LibraryModel(library, {})
+        self.proxy = LibraryFilterProxyModel()
+        self.proxy.setSourceModel(self.model)
         self.dataChanged_rows = []
         self.model.dataChanged.connect(
             lambda tl, br, *_: self.dataChanged_rows.append(
@@ -108,6 +114,19 @@ class PlayTimeTrackingTests(unittest.TestCase):
 
         self.assertNotIn("play_seconds", lib[0])
         self.assertEqual(self._saved, [])
+
+    def test_recent_view_refreshes_after_session(self):
+        # A game with no prior play is invisible in the "Recently Played" view;
+        # after a session finishes while that view is active it must appear (G4).
+        lib = [{"path": "/roms/a.nes", "name": "A"}]
+        host = _StubHost(lib)
+        host.proxy.set_system_filter(RECENT_FILTER)
+        self.assertEqual(host.proxy.rowCount(), 0)  # nothing played yet
+
+        self._call(host, {"rom_path": "/roms/a.nes", "elapsed_seconds": 60.0})
+
+        # The just-played game is now in the recomputed recent set.
+        self.assertEqual(host.proxy.rowCount(), 1)
 
 
 if __name__ == "__main__":

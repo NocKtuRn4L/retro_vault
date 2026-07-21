@@ -308,13 +308,6 @@ class ControllerRouterTests(unittest.TestCase):
         self.assertEqual(received, [ActionEvent(Action.ACCEPT, repeat=False)])
         router.stop()
 
-    def test_set_target_overrides_active_window(self):
-        backend = _QueueBackend([])
-        router = ControllerRouter(backend, InputStateMachine())
-        sentinel = object()
-        router.set_target(sentinel)
-        self.assertIs(router.route_action(ActionEvent(Action.MENU)), sentinel)
-
 
 if __name__ == "__main__":
     unittest.main()
