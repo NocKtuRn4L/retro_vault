@@ -57,6 +57,43 @@ class MergeScanTests(unittest.TestCase):
         merged = library.merge_scan(old, new)
         self.assertEqual(len(merged), 1)
 
+    def test_preserves_enrichment_across_a_move(self):
+        # Same file, new path (moved/renamed): matched by (ext, size) fingerprint.
+        old = [self._entry("/roms/old/mario.nes", size=1024, favorite=True, play_seconds=99)]
+        new = [self._entry("/roms/new/mario.nes", size=1024)]
+        merged = library.merge_scan(old, new)
+        self.assertEqual(merged[0]["path"], "/roms/new/mario.nes")
+        self.assertTrue(merged[0]["favorite"])
+        self.assertEqual(merged[0]["play_seconds"], 99)
+
+    def test_ambiguous_fingerprint_does_not_cross_contaminate(self):
+        # Two moved files with identical (ext, size): don't guess — drop enrichment.
+        old = [
+            self._entry("/roms/a.nes", size=2048, favorite=True),
+            self._entry("/roms/b.nes", size=2048, play_seconds=50),
+        ]
+        new = [
+            self._entry("/roms/x.nes", size=2048),
+            self._entry("/roms/y.nes", size=2048),
+        ]
+        merged = library.merge_scan(old, new)
+        for entry in merged:
+            self.assertNotIn("favorite", entry)
+            self.assertNotIn("play_seconds", entry)
+
+    def test_move_match_requires_a_size(self):
+        # Without a size the fingerprint is too weak; a moved file loses enrichment.
+        old = [self._entry("/roms/old/mario.nes", favorite=True)]  # no size
+        new = [self._entry("/roms/new/mario.nes")]
+        merged = library.merge_scan(old, new)
+        self.assertNotIn("favorite", merged[0])
+
+    def test_hidden_flag_survives_rescan(self):
+        old = [self._entry("/roms/mario.nes", size=10, hidden=True)]
+        new = [self._entry("/roms/mario.nes", size=10)]
+        merged = library.merge_scan(old, new)
+        self.assertTrue(merged[0]["hidden"])
+
 
 class ScanRomsTests(unittest.TestCase):
     def _config(self, rom_dir):

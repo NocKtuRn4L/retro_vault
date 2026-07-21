@@ -714,10 +714,13 @@ class MainWindow(QMainWindow):
 
     def _refresh_sidebar(self):
         selected = self.sidebar.currentItem().data(Qt.ItemDataRole.UserRole) if self.sidebar.currentItem() else ""
+        # Hidden (removed) games are excluded from every count so the sidebar
+        # totals match what the table actually shows.
+        visible = [rom for rom in self.library if not rom.get("hidden")]
         counts = {}
-        for rom in self.library:
+        for rom in visible:
             counts[rom.get("system", "")] = counts.get(rom.get("system", ""), 0) + 1
-        favorite_count = sum(1 for rom in self.library if rom.get("favorite"))
+        favorite_count = sum(1 for rom in visible if rom.get("favorite"))
         collections = self._get_collections()
         # Keep the proxy's collection membership in sync with the sidebar.
         self.proxy.set_collections(collections)
@@ -744,7 +747,7 @@ class MainWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, f"collection:{name}")
             self.sidebar.addItem(item)
 
-        all_item = QListWidgetItem(f"ALL GAMES ({len(self.library)})")
+        all_item = QListWidgetItem(f"ALL GAMES ({len(visible)})")
         all_item.setData(Qt.ItemDataRole.UserRole, "")
         self.sidebar.addItem(all_item)
         selected_row = self.sidebar.count() - 1  # default: ALL GAMES
@@ -784,7 +787,7 @@ class MainWindow(QMainWindow):
 
     def _update_count_label(self):
         shown = self.proxy.rowCount() if hasattr(self, "proxy") else len(self.library)
-        total = len(self.library)
+        total = sum(1 for rom in self.library if not rom.get("hidden"))
         self.count_label.setText(f"{shown} / {total} ROMs" if total else "")
 
     def _open_context_menu(self, pos):
@@ -896,8 +899,12 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
 
     def _remove_rom(self, rom):
-        self._refresh_library([item for item in self.library if item.get("path") != rom.get("path")])
+        # Flag as hidden rather than dropping the entry: a dropped entry is
+        # re-added by the next rescan, whereas a hidden flag is preserved by
+        # merge_scan so the removal sticks. filterAcceptsRow hides it from views.
+        rom["hidden"] = True
         save_library(self.library)
+        self._refresh_library(self.library)
         self.statusBar().showMessage("Removed from library", 3000)
 
     def _track_worker(self, worker):
@@ -908,6 +915,13 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self.controller:
             self.controller.stop()
+        # Detach cleanly from an emulator session still being observed, so its
+        # wait-thread isn't destroyed mid-run as the window tears down (C5).
+        if self.launch_coordinator is not None:
+            try:
+                self.launch_coordinator.shutdown()
+            except Exception:  # pragma: no cover - close must never fail
+                pass
         for worker in self._workers:
             # A scrape worker runs a blocking network loop; ask it to stop at the
             # next entry so close doesn't hang or leave the thread running.

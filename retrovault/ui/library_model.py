@@ -177,6 +177,11 @@ class LibraryFilterProxyModel(QSortFilterProxyModel):
         rom = model.rom_at(source_row)
         if not rom:
             return False
+        # Games removed from the library are flagged hidden rather than deleted,
+        # so removal survives a rescan (merge_scan preserves the flag). They are
+        # never shown in any view.
+        if rom.get("hidden"):
+            return False
         key = self.system_key
         if key == FAVORITES_FILTER:
             if not rom.get("favorite"):

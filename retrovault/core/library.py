@@ -64,31 +64,87 @@ def _classify_system(size, candidates):
     return candidates[0]
 
 
+def _fingerprint(entry):
+    """A cheap move-resilient identity for an entry: ``(ext, size)``.
+
+    Used as a secondary match when a file's path changes between scans (moved or
+    renamed) so its enrichment isn't lost. ``None`` when size is unknown, since a
+    fingerprint without a size is too weak to match on.
+    """
+    size = entry.get("size")
+    if size is None:
+        return None
+    return (entry.get("ext"), size)
+
+
 def merge_scan(old_library, new_library):
     """Carry enriched per-game fields from a previous library onto a fresh scan.
 
     ``scan_roms`` rebuilds entries from disk containing only :data:`SCAN_FIELDS`.
     Any extra fields added later — favorites, play time, cached artwork paths,
     scraped metadata — would be lost every rescan. This copies those extra
-    fields from ``old_library`` onto matching ``new_library`` entries, keyed by
-    absolute path. Fresh scan fields always win, so a moved/renamed file is
-    reflected correctly; enrichment for paths no longer present is dropped.
+    fields from ``old_library`` onto matching ``new_library`` entries.
 
-    Keying on the non-scan fields generically (rather than an explicit list)
-    means future enrichment fields are preserved automatically.
+    Matching is primarily by absolute path. For an old entry whose path is gone
+    from the new scan (the file was moved or renamed), a secondary match by
+    ``(ext, size)`` fingerprint carries its enrichment to the single new entry
+    with the same fingerprint — but only when that match is *unambiguous* (exactly
+    one unclaimed old and one unclaimed new entry share it), never a guess. Fresh
+    scan fields always win, so scan-owned values on the moved file stay correct;
+    enrichment for paths that truly disappeared is dropped.
+
+    Keying enrichment on the non-scan fields generically (rather than an explicit
+    list) means future enrichment fields are preserved automatically.
     """
-    preserved = {}
-    for entry in old_library or []:
+    old_entries = list(old_library or [])
+    new_entries = list(new_library or [])
+
+    # Enrichment (everything outside SCAN_FIELDS) keyed by path.
+    preserved_by_path = {}
+    for entry in old_entries:
         path = entry.get("path")
         if not path:
             continue
         extra = {k: v for k, v in entry.items() if k not in SCAN_FIELDS}
         if extra:
-            preserved[path] = extra
+            preserved_by_path[path] = extra
+
+    new_paths = {e.get("path") for e in new_entries}
+
+    # Secondary index: old entries whose path vanished, grouped by fingerprint.
+    # Only fingerprints shared by exactly one such old entry are eligible, so an
+    # ambiguous fingerprint never mis-assigns enrichment.
+    orphan_by_fp = {}
+    for entry in old_entries:
+        if entry.get("path") in new_paths:
+            continue  # still present by path; handled above
+        extra = {k: v for k, v in entry.items() if k not in SCAN_FIELDS}
+        if not extra:
+            continue
+        fp = _fingerprint(entry)
+        if fp is None:
+            continue
+        orphan_by_fp.setdefault(fp, []).append(extra)
+
+    # Count new entries per fingerprint so we only claim a unique target.
+    new_fp_counts = {}
+    for entry in new_entries:
+        if entry.get("path") in preserved_by_path:
+            continue  # matched by path; not a move target
+        fp = _fingerprint(entry)
+        if fp is not None:
+            new_fp_counts[fp] = new_fp_counts.get(fp, 0) + 1
 
     merged = []
-    for entry in new_library or []:
-        extra = preserved.get(entry.get("path"))
+    for entry in new_entries:
+        path = entry.get("path")
+        extra = preserved_by_path.get(path)
+        if extra is None:
+            # Try a unique fingerprint match for a moved/renamed file.
+            fp = _fingerprint(entry)
+            candidates = orphan_by_fp.get(fp) if fp is not None else None
+            if candidates and len(candidates) == 1 and new_fp_counts.get(fp) == 1:
+                extra = candidates.pop()
         # Scan-owned fields take precedence over any stale copy in ``extra``.
         merged.append({**extra, **entry} if extra else entry)
     return merged
