@@ -1,6 +1,8 @@
 """ROM library scanning and persistence."""
 
 import json
+import os
+import re
 from pathlib import Path
 
 from .paths import COLLECTIONS_FILE, LIBRARY_FILE
@@ -8,7 +10,58 @@ from .paths import COLLECTIONS_FILE, LIBRARY_FILE
 # Fields that ``scan_roms`` derives from disk and fully owns. Everything else on
 # a library entry (favorite, play_seconds, play_count, last_played, media,
 # metadata, ra_*, ...) is enrichment added elsewhere and must survive a rescan.
-SCAN_FIELDS = ("name", "path", "system", "ext")
+SCAN_FIELDS = ("name", "path", "system", "ext", "size")
+
+# A ``.bin``/``.img`` file at least this large, with no associated ``.cue``, is
+# treated as a PlayStation disc image rather than a Sega Genesis cartridge.
+# Genesis carts top out around 4-8 MB; PSX data tracks run tens to hundreds of
+# MB, so the gap is wide and this threshold is not sensitive to its exact value.
+_DISC_SIZE_THRESHOLD = 24 * 1024 * 1024
+
+# ``FILE "<name>" <TYPE>`` lines in a .cue sheet name the disc's data tracks.
+_CUE_FILE_RE = re.compile(r'FILE\s+"([^"]+)"', re.IGNORECASE)
+
+
+def _path_key(path):
+    """Canonical comparison key for a filesystem path (case-insensitive OS-safe)."""
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
+def parse_cue_tracks(cue_path):
+    """Return the data-file names a ``.cue`` sheet references.
+
+    Parses ``FILE "<name>" <type>`` lines, returning each name exactly as written
+    in the sheet (resolved against the cue's directory by the caller). Tolerant of
+    an unreadable/binary file, odd whitespace, and missing referenced files — it
+    never raises, returning ``[]`` on any read error.
+    """
+    names = []
+    try:
+        with open(cue_path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                match = _CUE_FILE_RE.search(line)
+                if match:
+                    names.append(match.group(1))
+    except OSError:
+        pass
+    return names
+
+
+def _classify_system(size, candidates):
+    """Pick the system id for a file whose extension has several candidates.
+
+    ``candidates`` preserves system-definition order. The only real ambiguity
+    today is ``.bin`` (claimed by both ``psx`` and ``genesis``): a large image is
+    a PSX disc track, a small one a Genesis cart. Cue-referenced ``.bin`` files
+    are excluded before this is reached, so only *standalone* ``.bin`` files land
+    here. Unambiguous extensions (one candidate) skip the heuristic entirely.
+    """
+    if len(candidates) == 1:
+        return candidates[0]
+    if "psx" in candidates and "genesis" in candidates:
+        return "psx" if (size or 0) >= _DISC_SIZE_THRESHOLD else "genesis"
+    # Any other overlap: keep the first-defined system (previous behaviour).
+    return candidates[0]
 
 
 def merge_scan(old_library, new_library):
@@ -81,24 +134,47 @@ def save_collections(collections):
 
 def scan_roms(config):
     library = []
-    ext_to_system = {}
+    # Each extension maps to the list of systems that claim it, in definition
+    # order, so genuinely ambiguous extensions (``.bin``) can be disambiguated
+    # per file rather than silently going to whichever system was defined last.
+    ext_to_systems = {}
     for sid, sdef in config["systems"].items():
         for ext in sdef["extensions"]:
-            ext_to_system[ext.lower()] = sid
+            ext_to_systems.setdefault(ext.lower(), []).append(sid)
 
     for rom_dir in config["rom_dirs"]:
         p = Path(rom_dir)
         if not p.is_dir():
             continue
-        for f in p.rglob("*"):
-            if f.is_file():
-                ext = f.suffix.lower()
-                if ext in ext_to_system:
-                    library.append({
-                        "name": f.stem,
-                        "path": str(f),
-                        "system": ext_to_system[ext],
-                        "ext": ext,
-                    })
+
+        files = [f for f in p.rglob("*") if f.is_file()]
+
+        # First pass: a .cue sheet owns its disc. Collect every data track it
+        # references so those .bin/.img/.iso files don't also become their own
+        # (junk) library entries — a multi-track PSX dump is one game, not N+1.
+        consumed = set()
+        for f in files:
+            if f.suffix.lower() == ".cue":
+                for name in parse_cue_tracks(f):
+                    consumed.add(_path_key(f.parent / name))
+
+        for f in files:
+            ext = f.suffix.lower()
+            candidates = ext_to_systems.get(ext)
+            if not candidates:
+                continue  # unknown extension
+            if ext != ".cue" and _path_key(f) in consumed:
+                continue  # a data track already represented by its .cue
+            try:
+                size = f.stat().st_size
+            except OSError:
+                size = 0
+            library.append({
+                "name": f.stem,
+                "path": str(f),
+                "system": _classify_system(size, candidates),
+                "ext": ext,
+                "size": size,
+            })
     library.sort(key=lambda x: (x["system"], x["name"].lower()))
     return library

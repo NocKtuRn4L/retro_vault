@@ -107,6 +107,82 @@ class ScanRomsTests(unittest.TestCase):
             self.assertTrue(merged[0]["favorite"])
             self.assertEqual(merged[0]["play_seconds"], 120)
 
+    def test_scan_records_file_size(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "mario.nes").write_bytes(b"abcde")
+            lib = library.scan_roms(self._config(root))
+            self.assertEqual(lib[0]["size"], 5)
+
+
+class DiscClassificationTests(unittest.TestCase):
+    """G1: .bin collision (PSX vs Genesis) and cue/bin disc de-duplication."""
+
+    def _config(self, rom_dir):
+        # Order matters: psx is defined before genesis, so both claim .bin and
+        # the classifier — not definition order — must decide.
+        return {
+            "rom_dirs": [str(rom_dir)],
+            "systems": {
+                "psx": {"extensions": [".bin", ".cue", ".iso", ".img"]},
+                "genesis": {"extensions": [".md", ".bin", ".gen", ".smd"]},
+            },
+        }
+
+    def test_cue_owns_its_bin_tracks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "FF7 (Disc 1).cue").write_text(
+                'FILE "FF7 (Disc 1) (Track 1).bin" BINARY\n'
+                '  TRACK 01 MODE2/2352\n'
+                'FILE "FF7 (Disc 1) (Track 2).bin" BINARY\n'
+                '  TRACK 02 AUDIO\n'
+            )
+            (root / "FF7 (Disc 1) (Track 1).bin").write_bytes(b"x")
+            (root / "FF7 (Disc 1) (Track 2).bin").write_bytes(b"x")
+
+            lib = library.scan_roms(self._config(root))
+
+            # Exactly one entry — the .cue — not one per track file.
+            self.assertEqual(len(lib), 1)
+            self.assertEqual(lib[0]["ext"], ".cue")
+            self.assertEqual(lib[0]["system"], "psx")
+
+    def test_standalone_small_bin_is_genesis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "sonic.bin").write_bytes(b"x" * 1024)  # tiny cart
+            lib = library.scan_roms(self._config(root))
+            self.assertEqual(len(lib), 1)
+            self.assertEqual(lib[0]["system"], "genesis")
+
+    def test_standalone_large_bin_is_psx(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            big = root / "loose_track.bin"
+            with open(big, "wb") as f:
+                f.truncate(library._DISC_SIZE_THRESHOLD + 1)  # sparse; no real disk cost
+            lib = library.scan_roms(self._config(root))
+            self.assertEqual(len(lib), 1)
+            self.assertEqual(lib[0]["system"], "psx")
+
+    def test_parse_cue_tracks_tolerates_junk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cue = Path(tmp) / "game.cue"
+            cue.write_text(
+                '\n'
+                'REM some comment\n'
+                'FILE "track.bin" BINARY\n'
+                '   \n'
+                'file "lower.iso" binary\n'  # case-insensitive
+            )
+            names = library.parse_cue_tracks(cue)
+            self.assertEqual(names, ["track.bin", "lower.iso"])
+
+    def test_parse_cue_tracks_missing_file(self):
+        # A path that does not exist must return [] rather than raise.
+        self.assertEqual(library.parse_cue_tracks(Path("/no/such/file.cue")), [])
+
 
 if __name__ == "__main__":
     unittest.main()
