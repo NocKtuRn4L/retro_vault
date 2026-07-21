@@ -90,6 +90,7 @@ class MainMenuDispatchTests(unittest.TestCase):
                     "Search Games",
                     "Scan ROMs",
                     "Add ROM Folder",
+                    "Scrape Artwork",
                     "Toggle Favorite (selected game)",
                     "Setup Wizard",
                     "Settings",
@@ -119,7 +120,7 @@ class MainMenuDispatchTests(unittest.TestCase):
             with mock.patch.object(mw, "MainMenuDialog") as dialog_cls:
                 inst = dialog_cls.return_value
                 inst.exec.return_value = QDialog.DialogCode.Accepted
-                inst.chosen_index = 5  # Settings
+                inst.chosen_index = 6  # Settings
                 window._open_menu()
             window.on_settings.assert_called_once()
         finally:

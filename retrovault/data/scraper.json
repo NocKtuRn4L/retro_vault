@@ -21,5 +21,24 @@
     "boxart": ["box-2D", "box-2D-front"],
     "logo": ["wheel", "wheel-hd"],
     "screenshot": ["ss", "sstitle"]
+  },
+  "libretro": {
+    "_comment": "libretro-thumbnails: account-free, name-matched static images at <base>/<system>/<Named_*>/<game name>.png. 'systems' maps a RetroVault system id to the libretro system folder; 'media_paths' maps a RetroVault media kind to the libretro subfolder.",
+    "base_url": "https://thumbnails.libretro.com",
+    "systems": {
+      "nes": "Nintendo - Nintendo Entertainment System",
+      "snes": "Nintendo - Super Nintendo Entertainment System",
+      "gb": "Nintendo - Game Boy",
+      "gbc": "Nintendo - Game Boy Color",
+      "gba": "Nintendo - Game Boy Advance",
+      "n64": "Nintendo - Nintendo 64",
+      "psx": "Sony - PlayStation",
+      "genesis": "Sega - Mega Drive - Genesis"
+    },
+    "media_paths": {
+      "boxart": "Named_Boxarts",
+      "logo": "Named_Titles",
+      "screenshot": "Named_Snaps"
+    }
   }
 }

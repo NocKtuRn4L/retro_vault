@@ -1,7 +1,10 @@
 """Qt model/proxy classes for the ROM library."""
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSize, QSortFilterProxyModel, Qt
+from PySide6.QtGui import QColor, QIcon, QPixmap, QPixmapCache
+
+# Box-art thumbnail size for the library list's decoration (portrait-ish).
+BOXART_THUMB = QSize(34, 46)
 
 
 class LibraryModel(QAbstractTableModel):
@@ -38,6 +41,9 @@ class LibraryModel(QAbstractTableModel):
             if index.column() == 2:
                 return rom.get("ext", "")
 
+        if role == Qt.ItemDataRole.DecorationRole and index.column() == 0:
+            return self._boxart_icon(rom)
+
         if role == Qt.ItemDataRole.ToolTipRole:
             return rom.get("path", "")
 
@@ -53,6 +59,43 @@ class LibraryModel(QAbstractTableModel):
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
             return self.COLUMNS[section]
         return None
+
+    def _boxart_icon(self, rom):
+        """Return a box-art thumbnail QIcon for ``rom``, always the same size.
+
+        Loads the cached box art lazily (scaled copy kept in Qt's global
+        QPixmapCache so scrolling never re-decodes from disk). When a row has no
+        box art — no ``media.boxart``, or the file is missing/unreadable — it
+        returns a transparent placeholder of the same size rather than ``None``,
+        so every row reserves identical icon space and the list stays aligned and
+        uniform in height whether or not a game has a cover.
+        """
+        path = (rom.get("media") or {}).get("boxart")
+        if path:
+            key = f"rv_boxart::{path}"
+            pixmap = QPixmapCache.find(key)
+            if pixmap is None or pixmap.isNull():
+                source = QPixmap(path)
+                if not source.isNull():
+                    pixmap = source.scaled(
+                        BOXART_THUMB,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                    QPixmapCache.insert(key, pixmap)
+            if pixmap is not None and not pixmap.isNull():
+                return QIcon(pixmap)
+        return self._placeholder_icon()
+
+    def _placeholder_icon(self):
+        """A cached, transparent, thumbnail-sized icon that reserves row space."""
+        key = "rv_boxart_placeholder"
+        pixmap = QPixmapCache.find(key)
+        if pixmap is None or pixmap.isNull():
+            pixmap = QPixmap(BOXART_THUMB)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            QPixmapCache.insert(key, pixmap)
+        return QIcon(pixmap)
 
     def rom_at(self, row):
         if 0 <= row < len(self.library):
