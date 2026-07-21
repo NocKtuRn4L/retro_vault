@@ -32,6 +32,7 @@ from .backend import (
     BTN_DPAD_UP,
     BTN_FACE_EAST,
     BTN_FACE_SOUTH,
+    BTN_FACE_WEST,
     BTN_SHOULDER_L,
     BTN_SHOULDER_R,
     BTN_START,
@@ -81,6 +82,8 @@ class InputStateMachine:
             (Action.ACCEPT, lambda b, x=accept_face: x in b),
             (Action.BACK, lambda b, f=back_face: f in b or BTN_BACK in b),
             (Action.MENU, lambda b: BTN_START in b),
+            # West face button (X on Xbox, □ on PlayStation) opens per-game options.
+            (Action.OPTIONS, lambda b: BTN_FACE_WEST in b),
             (Action.PREV_SYSTEM, lambda b: BTN_SHOULDER_L in b),
             (Action.NEXT_SYSTEM, lambda b: BTN_SHOULDER_R in b),
         ]
@@ -233,6 +236,14 @@ if _QT_AVAILABLE:
 
         # Emitted for every event the state machine produces. Payload: ActionEvent.
         action = Signal(object)
+        # Emitted when the backend's connection state changes (and once on start).
+        # Payload: bool (True = a controller is connected).
+        connection_changed = Signal(bool)
+
+        # Poll the connection state only every N ticks (~1 s at the 12 ms default):
+        # is_connected is cheap but not free, and status doesn't need per-tick
+        # resolution.
+        _CONN_CHECK_EVERY = 80
 
         def __init__(
             self,
@@ -248,6 +259,9 @@ if _QT_AVAILABLE:
             self._interval_ms = int(interval_ms)
             self._running = False
             self._paused = False
+            # Last observed connection state (None = not yet checked).
+            self._connected = None
+            self._conn_tick = 0
 
             self._timer = QTimer(self)
             self._timer.setInterval(self._interval_ms)
@@ -262,7 +276,11 @@ if _QT_AVAILABLE:
             self._backend.start()
             self._running = True
             self._paused = False
+            self._conn_tick = 0
             self._machine.reset()
+            # Report the initial connection state so the UI reflects it immediately
+            # (also re-reports after a launch, where start() re-acquires the pad).
+            self._check_connection(force=True)
             self._timer.start(self._interval_ms)
 
         def stop(self) -> None:
@@ -297,6 +315,22 @@ if _QT_AVAILABLE:
         def paused(self) -> bool:
             return self._paused
 
+        @property
+        def connected(self) -> bool:
+            """Last observed backend connection state (False until first checked)."""
+            return bool(self._connected)
+
+        # ── Connection tracking ──────────────────────────────────────────────
+        def _check_connection(self, force: bool = False) -> None:
+            """Emit ``connection_changed`` when the backend's connect state changes."""
+            try:
+                connected = bool(self._backend.is_connected())
+            except Exception:  # pragma: no cover - defensive; treat as disconnected
+                connected = False
+            if force or connected != self._connected:
+                self._connected = connected
+                self.connection_changed.emit(connected)
+
         # ── Timer tick ───────────────────────────────────────────────────────
         @staticmethod
         def _now_ms() -> float:
@@ -308,6 +342,11 @@ if _QT_AVAILABLE:
             state = self._backend.poll()
             for event in self._machine.update(state, self._now_ms()):
                 self.action.emit(event)
+            # Low-frequency connection poll so a dead/removed pad surfaces in the UI.
+            self._conn_tick += 1
+            if self._conn_tick >= self._CONN_CHECK_EVERY:
+                self._conn_tick = 0
+                self._check_connection()
 
 else:  # pragma: no cover - stub used only when PySide6 is unavailable
 

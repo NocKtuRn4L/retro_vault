@@ -21,6 +21,7 @@ class Action(enum.Enum):
     ACCEPT = "accept"
     BACK = "back"
     MENU = "menu"
+    OPTIONS = "options"
     PREV_SYSTEM = "previous_system"
     NEXT_SYSTEM = "next_system"
 

@@ -104,6 +104,8 @@ class MainWindow(QMainWindow):
         self.controller = None
         self._controller_busy = False
         self._menu_open = False
+        # Last controller connection state shown in the status bar (C2).
+        self._last_controller_connected = None
         # Which column controller Up/Down navigates: "systems" or "games".
         self._nav_column = "games"
 
@@ -190,10 +192,12 @@ class MainWindow(QMainWindow):
             machine = InputStateMachine.from_config(self.config_data["controller"])
             self.controller = ControllerRouter(backend, machine, parent=self)
             self.controller.action.connect(self._on_controller_action)
+            self.controller.connection_changed.connect(self._on_controller_connection)
             self.controller.start()
         except Exception as exc:  # pragma: no cover - defensive; never crash UI
             logger.warning("Controller input disabled: %s: %s", type(exc).__name__, exc)
             self.controller = None
+            self._on_controller_connection(False)
 
     def _build_top_bar(self):
         top_bar = QWidget()
@@ -335,10 +339,38 @@ class MainWindow(QMainWindow):
 
     def _build_status_bar(self):
         self.statusBar().showMessage("Welcome to RetroVault")
+        # Controller connection indicator (C2): a solid pad glyph when a
+        # controller is connected, greyed (disabled) when none is detected, and
+        # hidden entirely when controller support is disabled in config.
+        self.controller_indicator = QLabel("")
+        self.controller_indicator.setObjectName("controllerIndicator")
+        self.controller_indicator.setVisible(False)
+        self.statusBar().addPermanentWidget(self.controller_indicator)
         self.count_label = QLabel("")
         self.count_label.setObjectName("countLabel")
         self.statusBar().addPermanentWidget(self.count_label)
         self._update_count_label()
+
+    def _on_controller_connection(self, connected):
+        """Reflect controller connect/disconnect state in the status bar (C2)."""
+        label = getattr(self, "controller_indicator", None)
+        if label is None:
+            return
+        if not self.config_data.get("controller", {}).get("enabled", True):
+            label.setVisible(False)
+            return
+        label.setVisible(True)
+        label.setText("🎮")
+        # A disabled QLabel renders greyed, which reads well as "no controller".
+        label.setEnabled(bool(connected))
+        label.setToolTip("Controller connected" if connected else "No controller detected")
+        # Flash a transient note only on a genuine change, not the initial report.
+        prev = getattr(self, "_last_controller_connected", None)
+        if prev is not None and bool(connected) != prev:
+            self.statusBar().showMessage(
+                "Controller connected" if connected else "Controller disconnected", 3000
+            )
+        self._last_controller_connected = bool(connected)
 
     def _build_shortcuts(self):
         focus_search = QShortcut(QKeySequence("Ctrl+F"), self)
@@ -463,6 +495,10 @@ class MainWindow(QMainWindow):
             # just opened. singleShot(0) lets this tick return first so polling
             # continues inside the dialog's nested event loop.
             QTimer.singleShot(0, self._open_menu)
+        elif action is Action.OPTIONS:
+            # Per-game options for the selected ROM. Deferred for the same
+            # nested-event-loop reason as MENU above.
+            QTimer.singleShot(0, self._open_game_options)
 
     def _nav_move(self, delta):
         """Move selection by ``delta`` within the active column (systems/games)."""
@@ -542,6 +578,7 @@ class MainWindow(QMainWindow):
             ("Scan ROMs", self.on_scan_roms),
             ("Add ROM Folder", self.on_add_rom_dir),
             ("Scrape Artwork", self.on_scrape_artwork),
+            ("Game Options (selected game)", self._open_game_options),
             ("Toggle Favorite (selected game)", self._toggle_favorite_selected),
             ("Setup Wizard", self.on_setup),
             ("Settings", self.on_settings),
@@ -575,6 +612,79 @@ class MainWindow(QMainWindow):
         # (Settings/Setup) becomes the active modal cleanly.
         if chose and 0 <= index < len(actions):
             actions[index][1]()
+
+    def _game_options_actions(self, rom):
+        """(label, callback) rows for the selected game's options menu.
+
+        Mirrors the mouse context menu (`_open_context_menu`) so the same actions
+        are reachable from a controller. Reuses the existing handlers verbatim.
+        """
+        fav_label = "Remove from Favorites" if rom.get("favorite") else "Add to Favorites"
+        return [
+            ("Launch", self.on_launch_selected),
+            (fav_label, lambda: self._toggle_favorite(rom)),
+            ("Add to Collection…", lambda: self._open_collection_menu(rom)),
+            ("Open File Location", lambda: self._open_location(rom)),
+            ("Remove from Library", lambda: self._remove_rom(rom)),
+        ]
+
+    def _open_game_options(self):
+        """OPTIONS (or MENU fallback): controller-navigable per-game actions.
+
+        The mouse context menu is unreachable from a pad; this exposes the same
+        actions for the selected ROM via the gamepad-navigable ``MainMenuDialog``.
+        """
+        if self._menu_open:
+            return
+        rom = self._selected_rom()
+        if not rom:
+            self.statusBar().showMessage("No ROM selected", 3000)
+            return
+        self._menu_open = True
+        try:
+            actions = self._game_options_actions(rom)
+            dialog = MainMenuDialog([label for label, _ in actions], self)
+            dialog.setWindowTitle(rom.get("name", "Game"))
+            chose = dialog.exec() == QDialog.DialogCode.Accepted
+            index = dialog.chosen_index
+        finally:
+            self._menu_open = False
+        if chose and 0 <= index < len(actions):
+            actions[index][1]()
+
+    def _open_collection_menu(self, rom):
+        """Second-level controller menu: add/remove the game in a collection.
+
+        Lists "New Collection…" plus each existing collection (✓ when the game is
+        already a member); routes the choice to the same handlers the mouse
+        submenu uses.
+        """
+        if self._menu_open:
+            return
+        collections = self._get_collections()
+        names = [c.get("name", "") for c in collections if c.get("name")]
+        path = rom.get("path")
+        labels = ["New Collection…"]
+        for name in names:
+            member = any(
+                c.get("name") == name and path in (c.get("paths", []) or [])
+                for c in collections
+            )
+            labels.append(("✓ " if member else "") + name)
+        self._menu_open = True
+        try:
+            dialog = MainMenuDialog(labels, self)
+            dialog.setWindowTitle("Add to Collection")
+            chose = dialog.exec() == QDialog.DialogCode.Accepted
+            index = dialog.chosen_index
+        finally:
+            self._menu_open = False
+        if not chose:
+            return
+        if index == 0:
+            self._add_to_new_collection(rom)
+        elif 1 <= index <= len(names):
+            self._toggle_collection_membership(rom, names[index - 1])
 
     def _selected_rom(self):
         indexes = self.table.selectionModel().selectedRows()
