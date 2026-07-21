@@ -230,10 +230,10 @@ class MainWindow(QMainWindow):
         self.scrape_btn.clicked.connect(self.on_scrape_artwork)
         layout.addWidget(self.scrape_btn)
 
-        scan_roms_btn = QPushButton("SCAN ROMS")
-        scan_roms_btn.setProperty("accent", "true")
-        scan_roms_btn.clicked.connect(self.on_scan_roms)
-        layout.addWidget(scan_roms_btn)
+        self.scan_btn = QPushButton("SCAN ROMS")
+        self.scan_btn.setProperty("accent", "true")
+        self.scan_btn.clicked.connect(self.on_scan_roms)
+        layout.addWidget(self.scan_btn)
 
         return top_bar
 
@@ -861,6 +861,10 @@ class MainWindow(QMainWindow):
         if getattr(self, "_scrape_worker", None) is not None:
             return  # a scrape is already running
         self.scrape_btn.setEnabled(False)
+        # Block a concurrent rescan while the (multi-minute) scrape runs so the
+        # two don't fight over self.library. The scrape result is also merged by
+        # path (see _scrape_finished) as a second line of defence.
+        self.scan_btn.setEnabled(False)
         self.statusBar().showMessage("Scraping artwork…")
         worker = ScrapeWorker(self.library, self.config_data, parent=self)
         self._scrape_worker = worker
@@ -873,11 +877,34 @@ class MainWindow(QMainWindow):
     def _scrape_progress(self, done, total):
         self.statusBar().showMessage(f"Scraping artwork… {done}/{total}")
 
-    def _scrape_finished(self, library):
-        save_library(library)
-        self._refresh_library(library)
-        covers = sum(1 for rom in library if (rom.get("media") or {}).get("boxart"))
+    def _scrape_finished(self, updated):
+        # Merge the scraped media/metadata onto the CURRENT library by path rather
+        # than replacing it wholesale: the worker ran against a snapshot taken when
+        # the scrape started, so a rescan or removal that landed meanwhile must not
+        # be lost. Paths no longer present are simply skipped.
+        merged = self._merge_scrape_result(updated)
+        save_library(merged)
+        self._refresh_library(merged)
+        covers = sum(1 for rom in merged if (rom.get("media") or {}).get("boxart"))
         self.statusBar().showMessage(f"Artwork updated — {covers} covers", 5000)
+
+    def _merge_scrape_result(self, updated):
+        """Overlay scraped ``media``/``metadata`` from ``updated`` onto ``self.library``.
+
+        Matched by path; entries in ``updated`` whose path is gone from the live
+        library are dropped, and live entries the scrape didn't touch are left as-is.
+        Returns ``self.library`` (mutated in place) for the caller to persist.
+        """
+        by_path = {e.get("path"): e for e in (updated or []) if e.get("path") is not None}
+        for entry in self.library:
+            scraped = by_path.get(entry.get("path"))
+            if not scraped:
+                continue
+            if scraped.get("media"):
+                entry["media"] = scraped["media"]
+            if scraped.get("metadata"):
+                entry["metadata"] = scraped["metadata"]
+        return self.library
 
     def _scrape_failed(self, msg):
         QMessageBox.warning(self, "Scrape Artwork", msg)
@@ -886,6 +913,7 @@ class MainWindow(QMainWindow):
         worker = getattr(self, "_scrape_worker", None)
         self._scrape_worker = None
         self.scrape_btn.setEnabled(True)
+        self.scan_btn.setEnabled(True)
         if worker is not None:
             worker.deleteLater()
 
