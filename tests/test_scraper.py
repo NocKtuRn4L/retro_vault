@@ -168,7 +168,8 @@ class ScrapeRomTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             rom = _make_rom(tmp_dir)
             media_base = Path(tmp_dir) / "media"
-            result = scrape_rom(rom, {}, client, media_base=media_base)
+            all_media = {"scraper": {"media": ["boxart", "logo", "screenshot"]}}
+            result = scrape_rom(rom, all_media, client, media_base=media_base)
 
             self.assertEqual(result["metadata"]["genre"], "Platform")
             self.assertEqual(set(result["media"]), {"boxart", "logo", "screenshot"})
@@ -177,6 +178,22 @@ class ScrapeRomTests(unittest.TestCase):
             self.assertEqual(Path(result["media"]["boxart"]).read_bytes(), b"BOX")
         # Only the hash lookup ran (no name fallback needed).
         self.assertEqual(len(transport.calls), 1)
+
+    def test_downloads_only_box_art_by_default(self):
+        media_bytes = {
+            "https://ss/boxart-us.png": b"BOX",
+            "https://ss/logo.png": b"LOGO",
+            "https://ss/screen.png": b"SCREEN",
+        }
+        transport = FakeTransport(hash_response=GAME_FIXTURE, media=media_bytes)
+        client = ScreenScraperClient(transport, config={"scraper": {"region": "us"}})
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            rom = _make_rom(tmp_dir)
+            result = scrape_rom(rom, {}, client, media_base=Path(tmp_dir) / "media")
+
+            self.assertEqual(set(result["media"]), {"boxart"})
+            self.assertEqual(sorted(p.name for p in (Path(tmp_dir) / "media").rglob("*.png")),
+                             [Path(result["media"]["boxart"]).name])
 
     def test_name_fallback_when_hash_misses(self):
         transport = FakeTransport(
