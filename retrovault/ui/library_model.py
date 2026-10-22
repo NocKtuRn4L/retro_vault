@@ -8,17 +8,70 @@ BOXART_THUMB = QSize(34, 46)
 
 
 class LibraryModel(QAbstractTableModel):
+    """The library as a table, sorted in Python.
+
+    Column sorting lives here rather than in :class:`LibraryFilterProxyModel`:
+    a QSortFilterProxyModel compares rows pairwise through ``data()``, which
+    for a 20,000-game library is over a million Python calls (seconds) every
+    time the view is re-sorted, while ``list.sort`` with a key touches each
+    row once and takes milliseconds.
+    """
+
     COLUMNS = ("GAME", "SYSTEM", "EXT")
 
     def __init__(self, library=None, systems=None, parent=None):
         super().__init__(parent)
         self.library = list(library or [])
         self.systems = systems or {}
+        self._sort_column = -1
+        self._sort_order = Qt.SortOrder.AscendingOrder
 
     def set_library(self, library):
         self.beginResetModel()
         self.library = list(library or [])
+        self._sort_rows()
         self.endResetModel()
+
+    def sort(self, column, order=Qt.SortOrder.AscendingOrder):
+        self._sort_column, self._sort_order = column, order
+        self.layoutAboutToBeChanged.emit()
+        # Keep selections and other persistent indexes on the same games.
+        old_indexes = self.persistentIndexList()
+        old_roms = [self.library[index.row()] for index in old_indexes]
+        self._sort_rows()
+        new_rows = {id(rom): row for row, rom in enumerate(self.library)}
+        self.changePersistentIndexList(
+            old_indexes,
+            [self.index(new_rows[id(rom)], index.column()) for rom, index in zip(old_roms, old_indexes)],
+        )
+        self.layoutChanged.emit()
+
+    def _sort_rows(self):
+        column = self._sort_column
+        if not 0 <= column < len(self.COLUMNS):
+            return
+
+        def key(rom):
+            name = str(rom.get("name", "")).casefold()
+            if column == 1:
+                return (self._system_text(rom).casefold(), name)
+            if column == 2:
+                return (str(rom.get("ext", "")).casefold(), name)
+            return name
+
+        self.library.sort(key=key, reverse=self._sort_order == Qt.SortOrder.DescendingOrder)
+
+    def _system_text(self, rom):
+        system_key = rom.get("system", "")
+        system = self.systems.get(system_key, {})
+        return system.get("short") or system.get("name") or system_key.upper()
+
+    def refresh_rom(self, rom):
+        """Repaint the row holding ``rom`` (the same dict object) after it changed."""
+        for row, entry in enumerate(self.library):
+            if entry is rom:
+                self.dataChanged.emit(self.index(row, 0), self.index(row, self.columnCount() - 1))
+                return
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self.library)
@@ -37,7 +90,7 @@ class LibraryModel(QAbstractTableModel):
             if index.column() == 0:
                 return rom.get("name", "")
             if index.column() == 1:
-                return system.get("short") or system.get("name") or system_key.upper()
+                return self._system_text(rom)
             if index.column() == 2:
                 return rom.get("ext", "")
 
@@ -126,13 +179,30 @@ class LibraryFilterProxyModel(QSortFilterProxyModel):
         self._recent_paths = set()
         self.setSortCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
 
+    def sort(self, column, order=Qt.SortOrder.AscendingOrder):
+        """Sort by ``column`` in the source model; see :class:`LibraryModel`.
+
+        The proxy itself stays in source order (sort column -1) except in the
+        "Recently Played" view, whose few rows it orders most-recent-first.
+        """
+        model = self.sourceModel()
+        if model is not None and column >= 0:
+            model.sort(column, order)
+        if self.system_key != RECENT_FILTER:
+            super().sort(-1)
+
     def set_system_filter(self, system_key):
+        leaving_recent = self.system_key == RECENT_FILTER
+        if leaving_recent:
+            # Drop the recency ordering while only the recent rows are mapped,
+            # so it never runs the Python lessThan over the whole library.
+            super().sort(-1)
         self.system_key = system_key or ""
         if self.system_key == RECENT_FILTER:
             self._compute_recent()
-        # invalidate() re-runs both filtering AND sorting so the "__recent__"
-        # view's custom lessThan ordering takes effect (and is undone on exit).
-        self.invalidate()
+        self._refresh_filter()
+        if self.system_key == RECENT_FILTER:
+            super().sort(0)
 
     def set_collections(self, collections):
         """Store collections as ``{name: set(paths)}`` for ``collection:<name>`` filtering.

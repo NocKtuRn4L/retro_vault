@@ -281,6 +281,9 @@ class MainWindow(QMainWindow):
         self.table.verticalHeader().setDefaultSectionSize(BOXART_THUMB.height() + 6)
         self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        # setSortingEnabled re-sorts by the header's indicator, which Qt
+        # defaults to descending; point it at A-Z first.
+        self.table.horizontalHeader().setSortIndicator(0, Qt.SortOrder.AscendingOrder)
         self.table.setSortingEnabled(True)
         self.table.doubleClicked.connect(lambda _index: self.on_launch_selected())
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -288,6 +291,11 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        # Size those columns from at most a screenful of rows. Qt's default
+        # (1000 rows, and every row while the table is hidden) re-measures
+        # through the stylesheet on each relayout, which costs about a second
+        # with a 20,000-game library.
+        self.table.horizontalHeader().setResizeContentsPrecision(50)
         content_layout.addWidget(self.table, 1)
 
         self.placeholder_label = QLabel(
@@ -1136,17 +1144,16 @@ class MainWindow(QMainWindow):
             return
         if elapsed < MIN_PLAY_SECONDS:
             return
-        for row, entry in enumerate(self.library):
+        for entry in self.library:
             if entry.get("path") != rom_path:
                 continue
             entry["play_seconds"] = int(entry.get("play_seconds", 0)) + int(elapsed)
             entry["play_count"] = int(entry.get("play_count", 0)) + 1
             entry["last_played"] = datetime.now(timezone.utc).isoformat()
             save_library(self.library)
-            # Refresh only the affected source row so the view reflects the update.
-            top_left = self.model.index(row, 0)
-            bottom_right = self.model.index(row, self.model.columnCount() - 1)
-            self.model.dataChanged.emit(top_left, bottom_right)
+            # Refresh only the affected row so the view reflects the update. The
+            # model keeps its own sorted order, so it finds the row itself.
+            self.model.refresh_rom(entry)
             # "Recently Played" is computed once when the view is selected, so a
             # session that finishes while sitting in that view would otherwise not
             # surface or re-sort the just-played game. Re-apply the filter to
