@@ -45,6 +45,14 @@ class MainWindowFavoritesTests(unittest.TestCase):
             for row in range(window.sidebar.count())
         ]
 
+    def test_library_starts_sorted_a_to_z(self):
+        window = self._make_window()
+        try:
+            names = [window.proxy.index(row, 0).data() for row in range(window.proxy.rowCount())]
+            self.assertEqual(names, ["Alpha", "Bravo", "Charlie"])
+        finally:
+            window.close()
+
     def test_sidebar_prepends_sentinel_rows(self):
         window = self._make_window(collections=[{"name": "RPGs", "paths": []}])
         try:
