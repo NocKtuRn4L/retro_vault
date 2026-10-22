@@ -34,11 +34,50 @@ _HASH_CHUNK = 1024 * 1024
 _MAX_HASH_BYTES = 512 * 1024 * 1024
 
 
-def rom_hashes(path: str | Path, *, max_bytes: int = _MAX_HASH_BYTES) -> tuple[Optional[str], Optional[str]]:
+# Some dumps carry a header in front of the game data, and the same game hashes
+# differently with and without it. Which variant ScreenScraper has on record
+# varies, so a hash miss is retried on the data alone (see scrape_rom).
+_INES_MAGIC = b"NES\x1a"
+_INES_HEADER_BYTES = 16
+_INES_TRAINER_BYTES = 512
+_SNES_COPIER_HEADER_BYTES = 512
+
+
+def rom_header_size(path: str | Path, system: str) -> int:
+    """Return the size of a strippable header in front of the ROM data, or 0.
+
+    NES: an iNES / NES 2.0 header (16 bytes, plus a 512-byte trainer when bit 2
+    of flags 6 is set). SNES: a 512-byte copier header, which leaves the file
+    size 512 bytes past a 1 KiB boundary. Other systems never report a header.
+    """
+    p = Path(path)
+    try:
+        size = p.stat().st_size
+        if system == "nes":
+            with p.open("rb") as handle:
+                header = handle.read(_INES_HEADER_BYTES)
+            if len(header) < _INES_HEADER_BYTES or not header.startswith(_INES_MAGIC):
+                return 0
+            skip = _INES_HEADER_BYTES + (_INES_TRAINER_BYTES if header[6] & 0x04 else 0)
+        elif system == "snes" and size % 1024 == _SNES_COPIER_HEADER_BYTES:
+            skip = _SNES_COPIER_HEADER_BYTES
+        else:
+            return 0
+    except OSError:
+        return 0
+    # A "header" that is the whole file leaves nothing meaningful to hash.
+    return skip if size > skip else 0
+
+
+def rom_hashes(
+    path: str | Path, *, max_bytes: int = _MAX_HASH_BYTES, skip: int = 0
+) -> tuple[Optional[str], Optional[str]]:
     """Return ``(crc32, md5)`` hex digests for a ROM, streamed off disk.
 
-    Returns ``(None, None)`` when the file is missing, unreadable, or larger than
-    ``max_bytes`` (in which case the caller should fall back to a name lookup).
+    ``skip`` leaves out that many leading bytes, e.g. a header found by
+    :func:`rom_header_size`. Returns ``(None, None)`` when the file is missing,
+    unreadable, or larger than ``max_bytes`` (in which case the caller should
+    fall back to a name lookup).
     """
     p = Path(path)
     try:
@@ -51,6 +90,7 @@ def rom_hashes(path: str | Path, *, max_bytes: int = _MAX_HASH_BYTES) -> tuple[O
     md5 = hashlib.md5()
     try:
         with p.open("rb") as handle:
+            handle.seek(skip)
             while chunk := handle.read(_HASH_CHUNK):
                 crc = zlib.crc32(chunk, crc)
                 md5.update(chunk)
@@ -318,8 +358,10 @@ def scrape_rom(
 ) -> dict:
     """Scrape one library entry and cache its artwork.
 
-    Performs a hash-based lookup (CRC/MD5) first, falling back to a name lookup,
-    then downloads any found media into the local cache. Returns
+    Performs a hash-based lookup (CRC/MD5) first. On a miss, NES/SNES files that
+    carry a header are retried with the header excluded from the hash, before
+    falling back to a name lookup. Then downloads any found media into the
+    local cache. Returns
     ``{"media": {kind: abs_path_str, ...}, "metadata": {...}}`` for the caller to
     write onto the library entry. Always fails soft: a game with no result yields
     empty ``media``/``metadata`` and never raises.
@@ -341,6 +383,10 @@ def scrape_rom(
     info: Optional[GameInfo] = None
     if crc or md5:
         info = client.find_game(system, crc=crc, md5=md5)
+    if info is None and path and (header := rom_header_size(path, system)):
+        bare_crc, bare_md5 = rom_hashes(path, skip=header)
+        if bare_crc or bare_md5:
+            info = client.find_game(system, crc=bare_crc, md5=bare_md5)
     if info is None and name:
         info = client.find_game(system, name=name)
     if info is None:

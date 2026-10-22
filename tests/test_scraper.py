@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import tempfile
 import unittest
 import zlib
@@ -12,6 +13,7 @@ from retrovault.providers.scraper import (
     ScreenScraperClient,
     platform_id_for,
     rom_hashes,
+    rom_header_size,
     scrape_rom,
 )
 
@@ -48,17 +50,24 @@ EMPTY_FIXTURE = {"response": {}}
 
 
 class FakeTransport:
-    """In-memory HttpTransport serving fixture JSON and fake image bytes."""
+    """In-memory HttpTransport serving fixture JSON and fake image bytes.
 
-    def __init__(self, *, hash_response=None, name_response=None, media=None):
+    ``known_crc`` limits hash hits to lookups for that one CRC, so tests can tell
+    a full-file hash from a header-stripped one.
+    """
+
+    def __init__(self, *, hash_response=None, name_response=None, media=None, known_crc=None):
         self.hash_response = hash_response
         self.name_response = name_response
         self.media = media or {}
+        self.known_crc = known_crc
         self.calls = []
 
     def get_json(self, url, params):
         self.calls.append(dict(params))
         if params.get("crc") or params.get("md5"):
+            if self.known_crc is not None and params.get("crc") != self.known_crc:
+                return EMPTY_FIXTURE
             return self.hash_response if self.hash_response is not None else EMPTY_FIXTURE
         if params.get("romnom"):
             return self.name_response if self.name_response is not None else EMPTY_FIXTURE
@@ -74,6 +83,15 @@ def _make_rom(tmp_dir, content=b"ROMDATA", name="Super Mario World", system="sne
     rom_path = Path(tmp_dir) / f"{name}.sfc"
     rom_path.write_bytes(content)
     return {"name": name, "path": str(rom_path), "system": system}
+
+
+def _ines_header(trainer=False):
+    """A 16-byte iNES header; flags 6 bit 2 marks a 512-byte trainer."""
+    return b"NES\x1a" + bytes([2, 1, 0x04 if trainer else 0]) + bytes(9)
+
+
+def _crc(data):
+    return f"{zlib.crc32(data) & 0xFFFFFFFF:08x}"
 
 
 class PlatformMapTests(unittest.TestCase):
@@ -199,6 +217,67 @@ class ScrapeRomTests(unittest.TestCase):
         self.assertEqual(result["media"], {})
         self.assertEqual(result["metadata"]["genre"], "Platform")
 
+    def test_headered_nes_retries_with_header_stripped_hash(self):
+        data = b"PRG" * 100
+        # Only the header-free data is "on record"; the full-file hash misses.
+        transport = FakeTransport(hash_response=GAME_FIXTURE, known_crc=_crc(data))
+        client = ScreenScraperClient(transport, config={"scraper": {"region": "us"}})
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            rom = _make_rom(tmp_dir, content=_ines_header() + data, system="nes")
+            result = scrape_rom(rom, {}, client, media_base=Path(tmp_dir) / "media")
+        self.assertEqual(result["metadata"]["genre"], "Platform")
+        # Full-file hash, then the stripped hash hit; no name lookup needed.
+        self.assertEqual([call.get("crc") for call in transport.calls], [_crc(_ines_header() + data), _crc(data)])
+
+    def test_header_retry_runs_before_name_fallback(self):
+        transport = FakeTransport(hash_response=EMPTY_FIXTURE, name_response=GAME_FIXTURE)
+        client = ScreenScraperClient(transport, config={"scraper": {"region": "us"}})
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # 1 KiB of data behind a 512-byte copier header.
+            rom = _make_rom(tmp_dir, content=bytes(512) + b"S" * 1024)
+            result = scrape_rom(rom, {}, client, media_base=Path(tmp_dir) / "media")
+        self.assertEqual(result["metadata"]["genre"], "Platform")
+        self.assertEqual(len(transport.calls), 3)
+        self.assertEqual(transport.calls[1]["crc"], _crc(b"S" * 1024))
+        self.assertIn("romnom", transport.calls[2])
+
+
+class HeaderSizeTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+
+    def _write(self, content):
+        path = self.dir / "rom.bin"
+        path.write_bytes(content)
+        return path
+
+    def test_ines_header(self):
+        self.assertEqual(rom_header_size(self._write(_ines_header() + b"x" * 64), "nes"), 16)
+
+    def test_ines_header_with_trainer(self):
+        path = self._write(_ines_header(trainer=True) + bytes(512) + b"x" * 64)
+        self.assertEqual(rom_header_size(path, "nes"), 528)
+
+    def test_nes_without_magic_is_headerless(self):
+        self.assertEqual(rom_header_size(self._write(b"x" * 64), "nes"), 0)
+
+    def test_header_only_file_is_ignored(self):
+        self.assertEqual(rom_header_size(self._write(_ines_header()), "nes"), 0)
+
+    def test_snes_copier_header(self):
+        self.assertEqual(rom_header_size(self._write(bytes(512 + 2048)), "snes"), 512)
+
+    def test_snes_without_copier_header(self):
+        self.assertEqual(rom_header_size(self._write(bytes(2048)), "snes"), 0)
+
+    def test_other_systems_never_report_a_header(self):
+        self.assertEqual(rom_header_size(self._write(_ines_header() + b"x" * 64), "gb"), 0)
+
+    def test_missing_file(self):
+        self.assertEqual(rom_header_size(self.dir / "missing.nes", "nes"), 0)
+
 
 class HashTests(unittest.TestCase):
     def test_rom_hashes_match_known_values(self):
@@ -209,6 +288,14 @@ class HashTests(unittest.TestCase):
             crc, md5 = rom_hashes(path)
         self.assertEqual(crc, f"{zlib.crc32(content) & 0xFFFFFFFF:08x}")
         self.assertEqual(len(md5), 32)
+
+    def test_skip_hashes_only_the_data_after_the_header(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "rom.nes"
+            path.write_bytes(_ines_header() + b"game data")
+            crc, md5 = rom_hashes(path, skip=16)
+        self.assertEqual(crc, _crc(b"game data"))
+        self.assertEqual(md5, hashlib.md5(b"game data").hexdigest())
 
     def test_oversized_files_are_not_hashed(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
