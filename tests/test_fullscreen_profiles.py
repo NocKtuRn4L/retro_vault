@@ -3,6 +3,8 @@ import os
 import unittest
 import warnings
 
+from qt_support import qt_app
+
 from retrovault.core import config as config_mod
 from retrovault.providers.manifest import (
     FullscreenPolicy,
@@ -136,7 +138,7 @@ class ConfigFullscreenTests(unittest.TestCase):
 class SettingsDialogFullscreenTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def test_control_exists_and_save_persists(self):
         cfg = copy.deepcopy(config_mod.DEFAULT_CONFIG)

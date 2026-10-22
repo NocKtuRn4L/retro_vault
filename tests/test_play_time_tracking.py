@@ -8,10 +8,10 @@ and the sub-threshold drop are verified without constructing the full window.
 import os
 import unittest
 
+from qt_support import qt_app
+
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication
-
     from retrovault.ui import main_window as main_window_module
     from retrovault.ui.launch_overlay import MIN_PLAY_SECONDS
     from retrovault.ui.library_model import (
@@ -46,7 +46,7 @@ class _StubHost:
 class PlayTimeTrackingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def setUp(self):
         # Prevent the handler from touching disk.

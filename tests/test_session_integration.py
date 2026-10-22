@@ -11,6 +11,8 @@ import os
 import unittest
 from unittest import mock
 
+from qt_support import qt_app
+
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import QObject, Signal
@@ -55,7 +57,7 @@ class FakeSession(QObject):
 class SessionIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def setUp(self):
         # Shrink the coordinator's "returning" grace so the finished() transition

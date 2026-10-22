@@ -4,13 +4,14 @@ import subprocess
 import sys
 import unittest
 
+from qt_support import qt_app
+
 from retrovault.core import launch
 from retrovault.core.config import DEFAULT_CONFIG
 
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import QEventLoop, QTimer
-    from PySide6.QtWidgets import QApplication
 
     from retrovault.ui.launch_session import LaunchSession
 
@@ -59,7 +60,7 @@ class StartLaunchProcessTests(unittest.TestCase):
 class LaunchSessionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def _record(self, session):
         events = []

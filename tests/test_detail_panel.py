@@ -4,10 +4,10 @@ import os
 import unittest
 from unittest import mock
 
+from qt_support import qt_app
+
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication
-
     from retrovault.input.backend import NullBackend
     from retrovault.ui import main_window as mw
     from retrovault.ui.detail_panel import DetailPanel, _format_duration
@@ -54,7 +54,7 @@ FAKE_LIBRARY = [
 class DetailPanelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     # ── Standalone panel ──────────────────────────────────────────────────────
     def test_renders_none_without_error(self):

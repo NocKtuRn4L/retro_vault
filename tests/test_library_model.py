@@ -3,10 +3,10 @@
 import os
 import unittest
 
+from qt_support import qt_app
+
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication
-
     from retrovault.ui.library_model import LibraryFilterProxyModel, LibraryModel
 
     PYSIDE6_AVAILABLE = True
@@ -29,7 +29,7 @@ FAKE_LIBRARY = [
 class ProxyFilterTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def _proxy(self, library=None):
         model = LibraryModel(list(library or FAKE_LIBRARY), {})
