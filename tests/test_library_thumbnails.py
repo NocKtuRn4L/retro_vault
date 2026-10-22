@@ -5,11 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from qt_support import qt_app
+
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QIcon, QImage, QPixmapCache
-    from PySide6.QtWidgets import QApplication
 
     from retrovault.ui.library_model import LibraryModel
 
@@ -22,7 +23,7 @@ except ImportError:
 class BoxartDecorationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def setUp(self):
         QPixmapCache.clear()

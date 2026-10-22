@@ -1,10 +1,10 @@
 import os
 import unittest
 
+from qt_support import qt_app
+
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication
-
     from retrovault.ui.main_window import MainWindow
 
     PYSIDE6_AVAILABLE = True
@@ -16,7 +16,7 @@ except ImportError:
 class MainWindowSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def test_main_window_title_and_search_box(self):
         window = MainWindow()

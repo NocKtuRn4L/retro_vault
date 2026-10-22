@@ -4,9 +4,11 @@ import os
 import unittest
 from unittest import mock
 
+from qt_support import qt_app
+
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication, QDialog
+    from PySide6.QtWidgets import QDialog
 
     from retrovault.input.actions import Action, ActionEvent
     from retrovault.input.backend import NullBackend
@@ -23,7 +25,7 @@ except ImportError:
 class OnScreenKeyboardTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def _feed(self, kb, action):
         return kb.handle_controller_action(ActionEvent(action))
@@ -114,7 +116,7 @@ class OnScreenKeyboardTests(unittest.TestCase):
 class SearchViaKeyboardTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def _make_window(self):
         with (

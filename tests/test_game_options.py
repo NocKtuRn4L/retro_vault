@@ -10,9 +10,11 @@ import os
 import unittest
 from unittest import mock
 
+from qt_support import qt_app
+
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication, QDialog
+    from PySide6.QtWidgets import QDialog
 
     from retrovault.input.actions import Action, ActionEvent
     from retrovault.input.backend import NullBackend
@@ -34,7 +36,7 @@ FAKE_LIBRARY = [
 class GameOptionsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def _make_window(self):
         with (

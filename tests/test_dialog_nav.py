@@ -5,6 +5,8 @@ import os
 import unittest
 from unittest import mock
 
+from qt_support import qt_app
+
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import (
@@ -43,7 +45,7 @@ FAKE_LIBRARY = [
 class ControllerNavHelperTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def _dialog_with_buttons(self):
         dialog = QDialog()
@@ -113,7 +115,7 @@ class ControllerNavHelperTests(unittest.TestCase):
 class SettingsDialogNavTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def _dialog(self):
         cfg = copy.deepcopy(config_mod.DEFAULT_CONFIG)
@@ -175,7 +177,7 @@ class SettingsDialogNavTests(unittest.TestCase):
 class SetupWizardNavTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def _wizard(self, platform="windows-x86_64"):
         patcher = mock.patch("retrovault.ui.setup_wizard.detect.current_platform", return_value=platform)
@@ -255,7 +257,7 @@ class SetupWizardNavTests(unittest.TestCase):
 class MainWindowDelegationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def _make_window(self):
         with (

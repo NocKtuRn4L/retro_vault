@@ -1,6 +1,8 @@
 import os
 import unittest
 
+from qt_support import qt_app
+
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import QObject, Signal
@@ -52,7 +54,7 @@ class FakeShutdownSession(FakeSession):
 class LaunchOverlayTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def _make_overlay(self):
         parent = QWidget()
@@ -106,7 +108,7 @@ class LaunchOverlayTests(unittest.TestCase):
 class LaunchCoordinatorTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def _make_coordinator(self):
         host = QWidget()

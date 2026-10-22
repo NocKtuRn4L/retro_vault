@@ -4,9 +4,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from qt_support import qt_app
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
 
 from retrovault.core.config import DEFAULT_CONFIG
 from retrovault.providers.discovery import DetectResult
@@ -18,7 +19,7 @@ from retrovault.ui.setup_wizard import SetupWizard
 class SetupWizardProvisioningTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def make_wizard(self, platform="windows-x86_64"):
         patcher = mock.patch("retrovault.ui.setup_wizard.detect.current_platform", return_value=platform)

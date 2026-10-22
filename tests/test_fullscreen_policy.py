@@ -4,12 +4,12 @@ import os
 import unittest
 from unittest import mock
 
+from qt_support import qt_app
+
 from retrovault.core.config import migrate_config
 
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication
-
     from retrovault.input.backend import NullBackend
     from retrovault.ui import main_window as mw
     from retrovault.ui.main_window import MainWindow
@@ -40,7 +40,7 @@ class WindowModeConfigTests(unittest.TestCase):
 class ApplyWindowModeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def _make_window(self):
         with (

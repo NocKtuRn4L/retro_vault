@@ -9,6 +9,8 @@ need neither Qt nor a real controller. A single optional test exercises
 import os
 import unittest
 
+from qt_support import qt_app
+
 from retrovault.input import Action, ActionEvent, BackendState
 from retrovault.input.backend import (
     BTN_BACK,
@@ -248,8 +250,6 @@ class FromConfigTests(unittest.TestCase):
 # ── Optional Qt driver smoke test ─────────────────────────────────────────────
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication
-
     from retrovault.input.router import ControllerRouter
 
     _QT_AVAILABLE = True
@@ -284,7 +284,7 @@ class _QueueBackend:
 class ControllerRouterTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def test_tick_emits_action_signal(self):
         backend = _QueueBackend([_state(buttons={BTN_FACE_SOUTH})])
@@ -344,7 +344,7 @@ class _ConnBackend:
 class ControllerConnectionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = qt_app()
 
     def test_start_reports_initial_connection(self):
         backend = _ConnBackend(connected=True)
