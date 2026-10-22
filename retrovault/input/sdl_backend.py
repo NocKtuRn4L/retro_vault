@@ -206,6 +206,10 @@ class SdlBackend:
         # input; this hint tells SDL to keep delivering controller events even
         # though we never show a window. Required for the pad to work at all.
         os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
+        # SDL otherwise installs SIGINT/SIGTERM handlers that turn the signal
+        # into a QUIT event, which poll() discards: kill, Ctrl+C, logout and
+        # shutdown would all be ignored while the app is running.
+        os.environ.setdefault("SDL_NO_SIGNAL_HANDLERS", "1")
         try:
             pygame.display.init()
         except Exception:  # pragma: no cover - defensive; input may still work
