@@ -28,6 +28,9 @@ COLLECTIONS_FILE = APP_DIR / "collections.json"
 LOG_FILE = APP_DIR / "retrovault.log"
 TEST_ROM_FILE = APP_DIR / "test_roms.json"
 MEDIA_DIR = APP_DIR / "media"
+# ROMs unpacked from .zip files for emulators that can't open archives. Kept
+# between launches, since such emulators often write saves next to the ROM.
+EXTRACTED_DIR = APP_DIR / "extracted"
 
 
 def init_app_dirs():

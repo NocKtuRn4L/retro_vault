@@ -79,6 +79,8 @@ For emulator smoke testing, RetroVault also looks for a test ROM manifest at
 | PlayStation 1 | `.bin`, `.cue`, `.iso`, `.img` |
 | Sega Genesis | `.md`, `.bin`, `.gen`, `.smd` |
 
+Zipped ROMs (one game per `.zip`, as in No-Intro sets) are picked up too: a zip counts as a game when it holds exactly one ROM whose extension belongs to a single system. Zips holding several ROMs (such as zipped cue/bin discs) or an ambiguous `.bin` are skipped. RetroArch, mGBA and MesenCE open the zip directly; for other emulators RetroVault extracts the ROM to `extracted/` in its data folder at launch and keeps it there, since saves may be written next to it.
+
 ---
 
 ## Emulator Setup

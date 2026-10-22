@@ -2,15 +2,28 @@
 
 import copy
 import logging
+import os
 import shlex
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+import zipfile
+import zlib
+from pathlib import Path, PureWindowsPath
+
+from .library import extension_map, zip_rom_entry
+from .paths import EXTRACTED_DIR
 
 # Cache of flatpak `flatpak info <id>` results, keyed by flatpak_id, so
 # validation doesn't re-shell out on every launch/audit pass.
 _flatpak_info_cache = {}
+
+# Emulator profiles that open a zipped ROM themselves: RetroArch hands archives
+# to its cores (extracting for cores that need a real file) and these
+# standalones read .zip natively. Every other profile (DuckStation, Custom, and
+# ones whose zip support is unconfirmed, such as ares and RMG) is given an
+# extracted copy instead; see prepare_rom_for_launch.
+ZIP_CAPABLE_PROFILES = frozenset({"retroarch", "mgba", "mesen-ce", "snes9x", "fceux", "project64"})
 
 
 def _reset_flatpak_cache():
@@ -155,6 +168,75 @@ def validate_launch(rom, config):
     return None
 
 
+def _needs_extraction(rom, config):
+    """True when ``rom`` is a zipped ROM its configured emulator can't open."""
+    path = str(rom.get("path", "") or "")
+    if not path.lower().endswith(".zip"):
+        return False
+    system_key = rom.get("system", "")
+    extensions = config.get("systems", {}).get(system_key, {}).get("extensions", [])
+    if ".zip" in (ext.lower() for ext in extensions):
+        return False  # the system's own format is .zip (e.g. arcade sets)
+    if use_retroarch_for(config, system_key):
+        return False
+    return get_emulator_config(system_key, config).get("profile") not in ZIP_CAPABLE_PROFILES
+
+
+def _file_crc(path):
+    crc = 0
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            crc = zlib.crc32(chunk, crc)
+    return crc & 0xFFFFFFFF
+
+
+def extract_zipped_rom(zip_path, config, dest_root=None):
+    """Extract the ROM inside ``zip_path`` and return the extracted file's path.
+
+    The copy goes to ``<dest_root>/<system>/<zip stem>/<rom file name>`` and is
+    kept after play, because emulators that can't read archives often save
+    next to the ROM. A copy that already matches the entry's size and CRC is
+    reused. Raises ``ValueError`` when the zip holds no single recognizable ROM
+    and ``OSError``/``zipfile.BadZipFile`` when it can't be read or written.
+    """
+    found = zip_rom_entry(zip_path, extension_map(config.get("systems", {})))
+    if found is None:
+        raise ValueError("The archive does not contain exactly one recognizable ROM.")
+    info, system_key = found
+    # PureWindowsPath splits on both separators, so a crafted entry name can't
+    # climb out of the destination directory.
+    dest = Path(dest_root or EXTRACTED_DIR) / system_key / Path(zip_path).stem / PureWindowsPath(info.filename).name
+    if dest.is_file() and dest.stat().st_size == info.file_size and _file_crc(dest) == info.CRC:
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    partial = dest.with_name(dest.name + ".part")
+    with zipfile.ZipFile(zip_path) as zf, zf.open(info) as src, open(partial, "wb") as out:
+        shutil.copyfileobj(src, out)  # zf.open checks the CRC as it reads
+    os.replace(partial, dest)
+    return dest
+
+
+def prepare_rom_for_launch(rom, config):
+    """Swap a zipped ROM for an extracted copy when its emulator can't open zips.
+
+    Returns ``(rom, error)``. Plain files, zips headed for an emulator in
+    :data:`ZIP_CAPABLE_PROFILES` (or RetroArch), and launches that would fail
+    validation anyway come back unchanged, so an unconfigured emulator never
+    triggers an extraction. Otherwise the returned entry is a copy whose
+    ``path`` points at the extracted ROM; the library entry keeps the zip path.
+    """
+    if not _needs_extraction(rom, config) or validate_launch(rom, config):
+        return rom, None
+    zip_path = rom["path"]
+    try:
+        extracted = extract_zipped_rom(zip_path, config)
+    except Exception as e:
+        logging.exception("Failed to extract ROM from %s", zip_path)
+        return rom, f"Could not extract the ROM from:\n{zip_path}\n\n{e}"
+    logging.info("Extracted %s to %s for an emulator without zip support", zip_path, extracted)
+    return {**rom, "path": str(extracted)}, None
+
+
 def build_launch_command(rom, config, platform=None, validate=True):
     platform = platform or sys.platform
     system_key = rom["system"]
@@ -226,7 +308,9 @@ def _windows_shell_execute(cmd, verb="open"):
 
 
 def launch_rom(rom, config):
-    cmd, error = build_launch_command(rom, config)
+    rom, error = prepare_rom_for_launch(rom, config)
+    if not error:
+        cmd, error = build_launch_command(rom, config)
     if error:
         logging.warning("Launch validation failed for %s: %s", rom.get("path"), error)
         return False, error
@@ -293,7 +377,9 @@ def start_launch_process(rom, config):
     Unlike :func:`launch_rom` (fire-and-forget, kept for existing callers), this
     returns the process handle so a caller can wait for the emulator to exit.
     """
-    cmd, error = build_launch_command(rom, config)
+    rom, error = prepare_rom_for_launch(rom, config)
+    if not error:
+        cmd, error = build_launch_command(rom, config)
     if error:
         logging.warning("Launch validation failed for %s: %s", rom.get("path"), error)
         return None, error
