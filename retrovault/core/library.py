@@ -1,9 +1,11 @@
 """ROM library scanning and persistence."""
 
 import json
+import logging
 import os
 import re
-from pathlib import Path
+import zipfile
+from pathlib import Path, PurePosixPath
 
 from .paths import COLLECTIONS_FILE, LIBRARY_FILE
 
@@ -62,6 +64,56 @@ def _classify_system(size, candidates):
         return "psx" if (size or 0) >= _DISC_SIZE_THRESHOLD else "genesis"
     # Any other overlap: keep the first-defined system (previous behaviour).
     return candidates[0]
+
+
+def extension_map(systems):
+    """Map each ROM extension to the systems that claim it, in definition order.
+
+    Keeping every claimant (rather than letting the last-defined system win)
+    lets genuinely ambiguous extensions such as ``.bin`` be resolved per file.
+    """
+    ext_to_systems = {}
+    for sid, sdef in systems.items():
+        for ext in sdef.get("extensions", []):
+            ext_to_systems.setdefault(ext.lower(), []).append(sid)
+    return ext_to_systems
+
+
+def zip_rom_entry(path, ext_to_systems):
+    """Return ``(ZipInfo, system)`` for the one ROM inside a ``.zip``, or ``None``.
+
+    Reads only the archive's central directory; nothing is decompressed. The
+    zip counts as a game when exactly one entry has a ROM extension and that
+    extension belongs to a single system. Other files (``.sav``, ``.txt``,
+    macOS ``__MACOSX/`` resource forks) are ignored. Archives holding several
+    ROMs (zipped cue/bin discs, compilations) are skipped, as are entries with
+    an ambiguous extension: telling a ``.bin`` cart from a disc track or a
+    BIOS dump needs its contents, and No-Intro sets zip SNES enhancement-chip
+    and GBA BIOS ``.bin`` files that would otherwise appear as Genesis games.
+    Unreadable or corrupt archives are logged and skipped.
+    """
+    try:
+        with zipfile.ZipFile(path) as zf:
+            infos = zf.infolist()
+    except Exception as e:  # fail soft: one bad archive must not abort a scan
+        logging.warning("Skipping unreadable zip %s: %s", path, e)
+        return None
+    roms = [
+        info for info in infos
+        if not info.is_dir()
+        and not info.filename.startswith("__MACOSX/")
+        and PurePosixPath(info.filename).suffix.lower() in ext_to_systems
+    ]
+    if len(roms) != 1:
+        if roms:
+            logging.info("Skipping zip with %d ROMs inside: %s", len(roms), path)
+        return None
+    ext = PurePosixPath(roms[0].filename).suffix.lower()
+    systems = ext_to_systems[ext]
+    if len(systems) != 1:
+        logging.info("Skipping zip whose %s ROM could be any of %s: %s", ext, ", ".join(systems), path)
+        return None
+    return roms[0], systems[0]
 
 
 def _fingerprint(entry):
@@ -190,13 +242,7 @@ def save_collections(collections):
 
 def scan_roms(config):
     library = []
-    # Each extension maps to the list of systems that claim it, in definition
-    # order, so genuinely ambiguous extensions (``.bin``) can be disambiguated
-    # per file rather than silently going to whichever system was defined last.
-    ext_to_systems = {}
-    for sid, sdef in config["systems"].items():
-        for ext in sdef["extensions"]:
-            ext_to_systems.setdefault(ext.lower(), []).append(sid)
+    ext_to_systems = extension_map(config["systems"])
 
     for rom_dir in config["rom_dirs"]:
         p = Path(rom_dir)
@@ -217,6 +263,13 @@ def scan_roms(config):
         for f in files:
             ext = f.suffix.lower()
             candidates = ext_to_systems.get(ext)
+            if ext == ".zip":
+                # A zipped ROM takes the system of the ROM inside it. A system
+                # that claims ".zip" itself (e.g. arcade sets) still gets any
+                # zip that isn't a single recognizable ROM.
+                found = zip_rom_entry(f, ext_to_systems)
+                if found:
+                    candidates = [found[1]]
             if not candidates:
                 continue  # unknown extension
             if ext != ".cue" and _path_key(f) in consumed:
