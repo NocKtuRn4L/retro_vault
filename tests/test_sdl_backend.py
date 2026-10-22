@@ -5,6 +5,10 @@ needs no pygame. The ``SdlBackend`` lifecycle tests must pass whether or not
 pygame-ce is installed, and never require a physical controller.
 """
 
+import os
+import signal
+import subprocess
+import sys
 import unittest
 
 from retrovault.input.backend import (
@@ -91,6 +95,26 @@ class HeadlessHintTests(unittest.TestCase):
             self.assertEqual(os.environ.get("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"), "1")
         finally:
             backend.stop()
+
+
+@unittest.skipUnless(PYGAME_AVAILABLE, "pygame-ce is not installed")
+@unittest.skipIf(sys.platform == "win32", "SIGTERM always terminates the process on Windows")
+class SignalHandlingTests(unittest.TestCase):
+    """start() must leave SIGTERM alone, or the app ignores kill, logout and shutdown."""
+
+    def test_sigterm_still_terminates_after_start(self):
+        # Runs in a child process: the signal would otherwise kill the test runner.
+        script = (
+            "import os, signal, time\n"
+            "from retrovault.input.sdl_backend import SdlBackend\n"
+            "SdlBackend().start()\n"
+            "os.kill(os.getpid(), signal.SIGTERM)\n"
+            "time.sleep(5)\n"
+        )
+        # Drop any inherited hint so only start() can set it.
+        env = {k: v for k, v in os.environ.items() if k != "SDL_NO_SIGNAL_HANDLERS"}
+        result = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, -signal.SIGTERM, result.stderr.decode(errors="replace"))
 
 
 class NormalizeStateTests(unittest.TestCase):

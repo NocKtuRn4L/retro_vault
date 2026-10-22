@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 
 from retrovault.platform import detect, recommend
@@ -16,7 +18,32 @@ class DetectTests(unittest.TestCase):
     def test_current_platform_darwin(self):
         self.assertEqual(detect.current_platform("darwin", "arm64"), "darwin-arm64")
 
-    def test_is_raspberry_pi_false_on_this_machine(self):
+
+class RaspberryPiDetectTests(unittest.TestCase):
+    """Point detection at a temp file so results don't depend on the test machine."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.model_path = os.path.join(tmp.name, "model")
+        self.addCleanup(setattr, detect, "_DEVICE_TREE_MODEL", detect._DEVICE_TREE_MODEL)
+        detect._DEVICE_TREE_MODEL = self.model_path
+
+    def _write_model(self, content):
+        with open(self.model_path, "wb") as f:
+            f.write(content)
+
+    def test_is_raspberry_pi_true_for_pi_model(self):
+        # The kernel exposes the model string NUL-terminated.
+        self._write_model(b"Raspberry Pi 5 Model B Rev 1.1\x00")
+        self.assertTrue(detect.is_raspberry_pi())
+
+    def test_is_raspberry_pi_false_for_other_model(self):
+        self._write_model(b"Pine64 RockPro64 v2.1\x00")
+        self.assertFalse(detect.is_raspberry_pi())
+
+    def test_is_raspberry_pi_false_without_device_tree(self):
+        # Windows and most x86 Linux machines have no device-tree model file.
         self.assertFalse(detect.is_raspberry_pi())
 
 
