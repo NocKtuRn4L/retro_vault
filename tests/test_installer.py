@@ -8,7 +8,13 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
-from retrovault.providers.installer import ChecksumError, InstallError, InstallInstruction, install
+from retrovault.providers.installer import (
+    FLATHUB_REPO_URL,
+    ChecksumError,
+    InstallError,
+    InstallInstruction,
+    install,
+)
 from retrovault.providers.installer import uninstall as installer_uninstall
 from retrovault.providers.manifest import InstallStrategy
 
@@ -168,11 +174,39 @@ class InstallerTests(unittest.TestCase):
                 app_dir=Path(temp_dir),
                 opener=lambda *args, **kwargs: (_ for _ in ()).throw(OSError("offline")),
                 runner=runner,
+                which=lambda name: "/usr/bin/flatpak",
             )
 
         self.assertEqual(result, "org.example.Emulator")
-        self.assertEqual(calls[0][0], ["flatpak", "install", "-y", "--user", "flathub", "org.example.Emulator"])
-        self.assertTrue(calls[0][1]["check"])
+        self.assertEqual(
+            calls[0][0],
+            ["flatpak", "remote-add", "--user", "--if-not-exists", "flathub", FLATHUB_REPO_URL],
+        )
+        self.assertEqual(calls[1][0], ["flatpak", "install", "-y", "--user", "flathub", "org.example.Emulator"])
+        self.assertTrue(calls[1][1]["check"])
+
+    def test_flatpak_missing_returns_apt_instruction(self):
+        calls = []
+
+        def runner(command, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0)
+
+        strategy = InstallStrategy("flatpak", flatpak_id="org.example.Emulator")
+        result = install("example", "managed", strategy, runner=runner, which=lambda name: None)
+
+        self.assertEqual(result, InstallInstruction("sudo apt install flatpak"))
+        self.assertEqual(calls, [])
+
+    def test_flatpak_failure_reports_stderr(self):
+        def runner(command, **kwargs):
+            if "install" in command:
+                raise subprocess.CalledProcessError(1, command, stderr="error: No remote refs found\n")
+            return subprocess.CompletedProcess(command, 0)
+
+        strategy = InstallStrategy("flatpak", flatpak_id="org.example.Emulator")
+        with self.assertRaisesRegex(InstallError, "No remote refs found"):
+            install("example", "managed", strategy, runner=runner, which=lambda name: "/usr/bin/flatpak")
 
 
     def test_uninstall_download_deletes_emulator_directory(self):

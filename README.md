@@ -43,9 +43,12 @@ Use Raspberry Pi OS Trixie (Debian 13) or newer, then install with:
 ```bash
 sudo apt install pipx flatpak
 pipx install retrovault
-flatpak install flathub org.libretro.RetroArch
 retrovault --install-desktop-entry
 ```
+
+The setup wizard installs Flatpak emulators such as RetroArch for your user,
+adding the Flathub remote on first use. If Flatpak itself is missing, the
+wizard shows the `sudo apt install flatpak` command to run first.
 
 RetroArch is the recommended backend on Linux aarch64. Configure controllers
 inside each emulator; RetroVault's own interface currently targets keyboard

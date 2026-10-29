@@ -20,6 +20,7 @@ from .manifest import InstallStrategy
 DOWNLOAD_DIR = APP_DIR / "downloads"
 EMULATOR_DIR = APP_DIR / "emulators"
 ProgressCallback = Callable[[int, int | None], None]
+FLATHUB_REPO_URL = "https://dl.flathub.org/repo/flathub.flatpakrepo"
 
 
 class InstallError(RuntimeError):
@@ -47,6 +48,7 @@ def install(
     app_dir: Path = APP_DIR,
     opener: Callable[..., object] = urllib.request.urlopen,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    which: Callable[[str], str | None] = shutil.which,
 ) -> Path | str | InstallInstruction:
     """Run a strategy, trying its nested fallback when installation fails."""
     current: InstallStrategy | None = strategy
@@ -62,6 +64,7 @@ def install(
                 app_dir=app_dir,
                 opener=opener,
                 runner=runner,
+                which=which,
             )
         except (InstallError, OSError, subprocess.SubprocessError) as error:
             errors.append(str(error))
@@ -82,15 +85,24 @@ def _install_strategy(
     app_dir: Path,
     opener: Callable[..., object],
     runner: Callable[..., subprocess.CompletedProcess[str]],
+    which: Callable[[str], str | None],
 ) -> Path | str | InstallInstruction:
     if strategy.strategy == "download":
         return _install_download(emulator_id, version, strategy, progress, app_dir, opener, runner)
     if strategy.strategy == "flatpak":
+        if which("flatpak") is None:
+            return InstallInstruction("sudo apt install flatpak")
+        # A system-wide flathub remote is invisible to --user installs, so add a per-user one.
+        _run_flatpak(
+            ["flatpak", "remote-add", "--user", "--if-not-exists", "flathub", FLATHUB_REPO_URL],
+            runner,
+            "Failed to add the Flathub remote",
+        )
         command = ["flatpak", "install"]
         if assume_yes:
             command.append("-y")
         command.extend(["--user", "flathub", strategy.flatpak_id])
-        runner(command, check=True, text=True)
+        _run_flatpak(command, runner, f"Failed to install Flatpak app {strategy.flatpak_id}")
         return strategy.flatpak_id
     if strategy.strategy == "apt":
         return InstallInstruction(f"sudo apt install {strategy.package}")
@@ -263,6 +275,18 @@ def uninstall(
         return None
 
     raise InstallError(f"Unsupported uninstall target type for {emulator_id}")
+
+
+def _run_flatpak(
+    command: list[str],
+    runner: Callable[..., subprocess.CompletedProcess[str]],
+    failure: str,
+) -> None:
+    try:
+        runner(command, check=True, text=True, capture_output=True)
+    except subprocess.CalledProcessError as error:
+        detail = (error.stderr or "").strip()
+        raise InstallError(f"{failure}: {detail}" if detail else failure) from error
 
 
 def _safe_component(value: str, label: str) -> str:
