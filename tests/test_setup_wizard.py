@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from retrovault.core.config import DEFAULT_CONFIG
 from retrovault.providers.discovery import DetectResult
-from retrovault.providers.installer import InstallInstruction
+from retrovault.providers.installer import InstallError, InstallInstruction
 from retrovault.providers.manifest import load_shipped_registry
 from retrovault.ui.setup_wizard import SetupWizard
 
@@ -131,6 +131,58 @@ class SetupWizardProvisioningTests(unittest.TestCase):
         wizard._install_complete({"mgba": InstallInstruction("sudo apt install mgba-qt")})
         self.assertTrue(wizard.instruction.isReadOnly())
         self.assertEqual(wizard.instruction.text(), "sudo apt install mgba-qt")
+
+    def run_install_synchronously(self, wizard, manifest_id):
+        def start_worker(operation, on_success, sids=(), on_progress=None):
+            on_success(operation(lambda *args: None))
+
+        wizard._start_worker = start_worker
+        wizard._install_manifests((wizard.registry.get(manifest_id),), ())
+
+    @mock.patch("retrovault.ui.setup_wizard.config_mod.save_config")
+    @mock.patch("retrovault.ui.setup_wizard.audit_mod.load_test_rom_manifest", return_value={})
+    @mock.patch("retrovault.ui.setup_wizard.installer.install", return_value="org.libretro.RetroArch")
+    @mock.patch("retrovault.ui.setup_wizard.cores.install_cores")
+    def test_retroarch_install_downloads_its_cores(self, install_cores, _install, _manifest, _save):
+        wizard = self.make_wizard("linux-aarch64")
+
+        self.run_install_synchronously(wizard, "retroarch")
+
+        names, platform_key = install_cores.call_args.args
+        self.assertIn("mgba_libretro", set(names))
+        self.assertIn("nestopia_libretro", set(names))
+        self.assertEqual(platform_key, "linux-aarch64")
+        self.assertEqual(wizard.rows["gba"]["status"].text(), "READY")
+        self.assertTrue(wizard.instruction.isHidden())
+
+    @mock.patch("retrovault.ui.setup_wizard.config_mod.save_config")
+    @mock.patch("retrovault.ui.setup_wizard.audit_mod.load_test_rom_manifest", return_value={})
+    @mock.patch("retrovault.ui.setup_wizard.installer.install", return_value="org.libretro.RetroArch")
+    @mock.patch(
+        "retrovault.ui.setup_wizard.cores.install_cores",
+        side_effect=InstallError("Could not reach the libretro core index: offline"),
+    )
+    def test_core_download_failure_keeps_retroarch_and_explains(self, _install_cores, _install, _manifest, _save):
+        wizard = self.make_wizard("linux-aarch64")
+
+        self.run_install_synchronously(wizard, "retroarch")
+
+        self.assertEqual(wizard.config_data["emulators"]["gba"]["flatpak_id"], "org.libretro.RetroArch")
+        self.assertEqual(wizard.rows["gba"]["status"].text(), "READY")
+        self.assertFalse(wizard.instruction.isHidden())
+        self.assertIn("cores could not be downloaded", wizard.instruction.text())
+        self.assertIn("offline", wizard.instruction.text())
+
+    @mock.patch("retrovault.ui.setup_wizard.config_mod.save_config")
+    @mock.patch("retrovault.ui.setup_wizard.audit_mod.load_test_rom_manifest", return_value={})
+    @mock.patch("retrovault.ui.setup_wizard.installer.install", return_value=Path("/opt/mgba/mgba"))
+    @mock.patch("retrovault.ui.setup_wizard.cores.install_cores")
+    def test_emulators_without_cores_skip_the_core_download(self, install_cores, _install, _manifest, _save):
+        wizard = self.make_wizard("linux-x86_64")
+
+        self.run_install_synchronously(wizard, "mgba")
+
+        install_cores.assert_not_called()
 
     @mock.patch("retrovault.ui.setup_wizard.config_mod.save_config")
     @mock.patch("retrovault.ui.setup_wizard.audit_mod.audit_test_roms")

@@ -470,6 +470,14 @@ is set up, so a fresh install keeps its standalones. Tests in `tests/test_retroa
 
 ### 8b — Auto-provision RetroArch + cores (the remaining work)
 
+**Status (2026-10-30): cores ✅, pinned RetroArch ⬜.** `providers/cores.py` downloads cores from
+the buildbot's rolling `latest/` folder for linux-aarch64, linux-x86_64 and windows-x86_64. The
+buildbot publishes no pinnable versions, so each core is checked against the CRC-32 in
+`.index-extended` (RetroArch's own Core Downloader check) plus its ELF/PE header, not a pinned
+SHA-256. The wizard fetches them after installing RetroArch, and launches pass `-L` the downloaded
+path. Still open: a pinned RetroArch build (no stable aarch64 Linux build exists; nightlies are
+kept ~2 weeks, so pinning needs a mirror) and a managed `retroarch.cfg`.
+
 **Why it's a separate PR:** it needs *verified external artifacts* — a pinned RetroArch Windows
 build (url + sha256) and libretro **core** downloads — which must be fetched and checksummed
 deliberately, not fabricated.

@@ -114,6 +114,14 @@ Notes:
 
 RetroArch remains supported, but it is better treated as an advanced path.
 
+When the setup wizard installs RetroArch, it also downloads the cores for every
+supported system from the [libretro buildbot](https://buildbot.libretro.com/)
+into RetroVault's `cores` folder, checking each against the CRC-32 libretro
+publishes. Launches then hand RetroArch the downloaded core's full path. Cores
+are available for Linux aarch64, Linux x86_64 and Windows x86_64.
+
+To set RetroArch up by hand instead:
+
 1. Install [RetroArch](https://www.retroarch.com/).
 2. Download the cores you want inside RetroArch.
 3. In **SETTINGS > EMULATORS**, enable **Use RetroArch** and set the RetroArch binary path.
