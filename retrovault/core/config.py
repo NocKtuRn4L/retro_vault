@@ -96,6 +96,9 @@ DEFAULT_CONFIG = {
         "password": "",
         "region": "us",
         "enabled": False,
+        # Media kinds to download per game ("boxart", "logo", "screenshot").
+        # The UI shows box art only, and each extra kind is another download.
+        "media": ["boxart"],
     },
 }
 

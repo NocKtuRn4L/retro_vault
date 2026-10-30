@@ -15,15 +15,23 @@ entry dict (and preserved across rescans by ``core.library.merge_scan``).
 from __future__ import annotations
 
 import hashlib
+import html
+import http.client
 import json
 import logging
+import re
+import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 import zlib
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
 from typing import Mapping, Optional, Protocol, runtime_checkable
 
-from ..core.media import has_media, media_paths_for
+from ..core.media import media_paths_for
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +121,16 @@ def platform_id_for(system: str, data: Mapping = SCRAPER_DATA) -> Optional[int]:
     return data.get("platforms", {}).get(system)
 
 
+def wanted_media(config: Mapping) -> tuple[str, ...]:
+    """Media kinds to download, from ``config["scraper"]["media"]``.
+
+    Defaults to box art alone, the only kind the UI shows; logos and
+    screenshots each cost a download per game.
+    """
+    kinds = (config.get("scraper") or {}).get("media")
+    return tuple(kinds) if kinds else ("boxart",)
+
+
 # ── Interfaces ────────────────────────────────────────────────────────────────
 @runtime_checkable
 class HttpTransport(Protocol):
@@ -159,6 +177,11 @@ class ScreenScraperClient:
     The network layer is the injected ``transport``; ``config`` supplies the
     user's credentials/region (see the ``"scraper"`` block in ``DEFAULT_CONFIG``).
     """
+
+    uses_hashes = True
+    # ScreenScraper limits concurrent requests per account (one thread for
+    # free accounts), so lookups stay sequential.
+    max_workers = 1
 
     def __init__(
         self,
@@ -376,14 +399,16 @@ def scrape_rom(
     path = rom.get("path")
     name = str(rom.get("name", "") or "") or (Path(str(path)).stem if path else "")
 
+    # Name-matched providers ignore hashes; don't read every ROM to make them.
+    hashed = bool(path) and getattr(client, "uses_hashes", True)
     crc = md5 = None
-    if path:
+    if hashed:
         crc, md5 = rom_hashes(path)
 
     info: Optional[GameInfo] = None
     if crc or md5:
         info = client.find_game(system, crc=crc, md5=md5)
-    if info is None and path and (header := rom_header_size(path, system)):
+    if info is None and hashed and (header := rom_header_size(path, system)):
         bare_crc, bare_md5 = rom_hashes(path, skip=header)
         if bare_crc or bare_md5:
             info = client.find_game(system, crc=bare_crc, md5=bare_md5)
@@ -394,9 +419,10 @@ def scrape_rom(
 
     result["metadata"] = dict(info.metadata)
     paths = media_paths_for(rom, media_base)
+    wanted = wanted_media(config)
     for kind, url in info.media_urls.items():
         dest = paths.get(kind)
-        if dest is None:
+        if dest is None or kind not in wanted:
             continue
         data = client.fetch_media(url)
         if not data:
@@ -418,18 +444,32 @@ class LibretroThumbnailsClient:
     No account or API key: images are static files at
     ``<base>/<system folder>/<Named_*>/<game name>.png``. Matching is by the ROM's
     (No-Intro-style) name — hashes are ignored — and this source provides images
-    only, no text metadata. URLs are returned optimistically for each media kind;
-    a game that lacks a given kind 404s and is skipped by :func:`scrape_rom`'s
-    fail-soft download, so no empty files are cached.
+    only, no text metadata. Only the kinds in :func:`wanted_media` are looked up.
+
+    Each ``<Named_*>`` folder's directory listing names every image it holds, so
+    it is read once per system and kind, and URLs are returned only for images
+    that exist: a game without art costs no request, and a name that differs
+    only in letter case still matches. If a listing can't be read, URLs are
+    returned optimistically; a missing image then 404s and is skipped by
+    :func:`scrape_rom`'s fail-soft download, so no empty files are cached.
     """
 
     # Characters libretro-thumbnails replaces with "_" in its file names.
     _UNSAFE = set('&*/:`<>?\\|"')
+    # Image links in the server's (Apache) directory listings.
+    _INDEX_LINK = re.compile(r'<a href="([^"?/][^"]*)\.png"')
+
+    uses_hashes = False
+    # Static files behind a CDN: a few downloads at once hide the server's
+    # ~0.3 s round trip without hammering it.
+    max_workers = 6
 
     def __init__(self, transport: HttpTransport, config: Optional[Mapping] = None, data: Mapping = SCRAPER_DATA) -> None:
         self.transport = transport
         self.config = config or {}
         self.data = data
+        self._indexes: dict = {}
+        self._index_lock = threading.Lock()
 
     def _libretro(self) -> Mapping:
         return self.data.get("libretro", {})
@@ -439,6 +479,28 @@ class LibretroThumbnailsClient:
         """Apply libretro-thumbnails' filename character substitutions."""
         return "".join("_" if ch in cls._UNSAFE else ch for ch in name).strip()
 
+    def _index(self, folder_url: str):
+        """``(names, {casefolded name: name})`` for the images in ``folder_url``.
+
+        ``None`` when the listing can't be read. Fetched once per folder and
+        shared by the scrape's worker threads.
+        """
+        with self._index_lock:
+            if folder_url not in self._indexes:
+                self._indexes[folder_url] = self._read_index(folder_url)
+            return self._indexes[folder_url]
+
+    def _read_index(self, folder_url: str):
+        try:
+            body = self.transport.get_bytes(folder_url + "/").decode("utf-8", "replace")
+        except Exception as e:  # noqa: BLE001 - fall back to optimistic URLs
+            log.info("thumbnail listing not available: %s (%s)", folder_url, e)
+            return None
+        names = {html.unescape(urllib.parse.unquote(href)) for href in self._INDEX_LINK.findall(body)}
+        if not names:
+            return None
+        return names, {name.casefold(): name for name in names}
+
     def find_game(
         self,
         system: str,
@@ -447,18 +509,27 @@ class LibretroThumbnailsClient:
         md5: Optional[str] = None,
         name: Optional[str] = None,
     ) -> Optional[GameInfo]:
-        from urllib.parse import quote
-
+        quote = urllib.parse.quote
         libretro = self._libretro()
         folder = libretro.get("systems", {}).get(system)
         if not folder or not name:
             return None
         base = str(libretro.get("base_url", "")).rstrip("/")
         safe = self.normalize_name(name)
-        media_urls = {
-            kind: f"{base}/{quote(folder)}/{sub}/{quote(safe)}.png"
-            for kind, sub in libretro.get("media_paths", {}).items()
-        }
+        wanted = wanted_media(self.config)
+        media_urls = {}
+        for kind, sub in libretro.get("media_paths", {}).items():
+            if kind not in wanted:
+                continue
+            folder_url = f"{base}/{quote(folder)}/{sub}"
+            image = safe
+            index = self._index(folder_url)
+            if index is not None:
+                names, folded = index
+                image = safe if safe in names else folded.get(safe.casefold())
+                if image is None:
+                    continue  # the server has no such image
+            media_urls[kind] = f"{folder_url}/{quote(image)}.png"
         return GameInfo(metadata={}, media_urls=media_urls)
 
     def fetch_media(self, url: str) -> Optional[bytes]:
@@ -473,28 +544,61 @@ class LibretroThumbnailsClient:
 
 # ── Concrete transport (real network; injected in production, faked in tests) ──
 class UrllibTransport:
-    """A :class:`HttpTransport` over ``urllib``. Never used in tests."""
+    """A :class:`HttpTransport` over the standard library. Never used in tests.
+
+    Each thread keeps one connection per host open between requests. A fresh
+    HTTPS connection per request (``urlopen``) roughly doubled the time of
+    every thumbnail download. Proxies and redirects go through ``urlopen``.
+    Non-200 responses raise ``urllib.error.HTTPError``, as ``urlopen`` does.
+    """
+
+    _REDIRECTS = (301, 302, 303, 307, 308)
 
     def __init__(self, *, timeout: float = 15.0, user_agent: str = "retrovault") -> None:
         self.timeout = timeout
         self.user_agent = user_agent
+        self._local = threading.local()
 
-    def _open(self, url: str):
-        import urllib.request
-
+    def _urlopen(self, url: str) -> bytes:
         request = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
-        return urllib.request.urlopen(request, timeout=self.timeout)
-
-    def get_bytes(self, url: str) -> bytes:
-        with self._open(url) as response:
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
             return response.read()
 
-    def get_json(self, url: str, params: Mapping[str, str]) -> dict:
-        import urllib.parse
+    def _get(self, url: str) -> bytes:
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme not in ("http", "https") or urllib.request.getproxies().get(parts.scheme):
+            return self._urlopen(url)
+        connections = self._local.__dict__.setdefault("connections", {})
+        key = (parts.scheme, parts.netloc)
+        target = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+        for attempt in range(2):
+            connection = connections.get(key)
+            if connection is None:
+                factory = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
+                connection = connections[key] = factory(parts.netloc, timeout=self.timeout)
+            try:
+                connection.request("GET", target, headers={"User-Agent": self.user_agent})
+                response = connection.getresponse()
+                body = response.read()
+            except (http.client.HTTPException, OSError):
+                connection.close()
+                del connections[key]
+                if attempt:
+                    raise
+                continue  # the server may have dropped the idle connection; reconnect once
+            if response.status == 200:
+                return body
+            if response.status in self._REDIRECTS:
+                return self._urlopen(url)
+            raise urllib.error.HTTPError(url, response.status, response.reason, response.headers, None)
+        raise AssertionError("unreachable")
 
+    def get_bytes(self, url: str) -> bytes:
+        return self._get(url)
+
+    def get_json(self, url: str, params: Mapping[str, str]) -> dict:
         full = url + ("?" + urllib.parse.urlencode(dict(params)) if params else "")
-        with self._open(full) as response:
-            return json.loads(response.read().decode("utf-8"))
+        return json.loads(self._get(full).decode("utf-8"))
 
 
 def build_client(config: Mapping, transport: HttpTransport) -> Scraper:
@@ -524,32 +628,68 @@ def scrape_library(
 ):
     """Scrape media/metadata for every entry, returning a NEW library list.
 
-    Entries that already have cached media are skipped unless ``force``. Merges
-    any found ``media``/``metadata`` onto a copy of each entry (so
-    ``core.library.merge_scan`` preserves it across rescans). Calls
-    ``on_progress(done, total)`` after each entry and stops early — leaving the
-    remaining entries untouched — when ``should_cancel()`` returns True. A single
-    entry's failure never aborts the run.
+    Entries whose wanted media (see :func:`wanted_media`) is already in the
+    cache are pointed at those files without a lookup, unless ``force``. That
+    also recovers covers downloaded by a run that was interrupted before the
+    library was saved. Merges any found ``media``/``metadata`` onto a copy of
+    each entry (so ``core.library.merge_scan`` preserves it across rescans).
+
+    Lookups run on up to ``client.max_workers`` threads (default 1) and results
+    keep the library's order. Calls ``on_progress(done, total)`` from the
+    calling thread after each entry, and stops starting lookups — leaving the
+    remaining entries untouched — when ``should_cancel()`` returns True;
+    lookups already running finish. A single entry's failure never aborts the
+    run.
     """
     items = list(library or [])
     total = len(items)
-    updated = []
-    for index, rom in enumerate(items, start=1):
-        if should_cancel and should_cancel():
-            updated.extend(items[index - 1:])
-            break
+    updated = list(items)
+    wanted = wanted_media(config)
+    workers = max(1, int(getattr(client, "max_workers", 1)))
+    done = 0
+
+    def scrape(index):
+        rom = items[index]
+        try:
+            result = scrape_rom(rom, config, client, media_base=media_base)
+        except Exception:  # noqa: BLE001 - one bad entry must not abort the batch
+            log.warning("scrape failed for %s", rom.get("name"), exc_info=True)
+            result = {"media": {}, "metadata": {}}
         entry = dict(rom)
-        if force or not has_media(rom, media_base):
-            try:
-                result = scrape_rom(rom, config, client, media_base=media_base)
-            except Exception:  # noqa: BLE001 - one bad entry must not abort the batch
-                log.warning("scrape failed for %s", rom.get("name"), exc_info=True)
-                result = {"media": {}, "metadata": {}}
-            if result.get("media"):
-                entry["media"] = {**entry.get("media", {}), **result["media"]}
-            if result.get("metadata"):
-                entry["metadata"] = {**entry.get("metadata", {}), **result["metadata"]}
-        updated.append(entry)
-        if on_progress:
-            on_progress(index, total)
+        if result.get("media"):
+            entry["media"] = {**entry.get("media", {}), **result["media"]}
+        if result.get("metadata"):
+            entry["metadata"] = {**entry.get("metadata", {}), **result["metadata"]}
+        return index, entry
+
+    def finish(futures):
+        nonlocal done
+        for future in futures:
+            index, entry = future.result()
+            updated[index] = entry
+            done += 1
+            if on_progress:
+                on_progress(done, total)
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="scrape") as pool:
+        running = set()
+        for index, rom in enumerate(items):
+            if should_cancel and should_cancel():
+                break
+            cached = {} if force else {
+                kind: str(path)
+                for kind, path in media_paths_for(rom, media_base).items()
+                if kind in wanted and path.exists()
+            }
+            if cached:
+                updated[index] = {**rom, "media": {**(rom.get("media") or {}), **cached}}
+                done += 1
+                if on_progress:
+                    on_progress(done, total)
+                continue
+            running.add(pool.submit(scrape, index))
+            if len(running) >= 2 * workers:  # bounded queue: cancel stays prompt
+                finished, running = wait(running, return_when=FIRST_COMPLETED)
+                finish(finished)
+        finish(running)
     return updated
