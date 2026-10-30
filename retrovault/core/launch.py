@@ -12,7 +12,7 @@ import zlib
 from pathlib import Path, PureWindowsPath
 
 from .library import extension_map, zip_rom_entry
-from .paths import EXTRACTED_DIR
+from .paths import CORES_DIR, EXTRACTED_DIR
 
 # Cache of flatpak `flatpak info <id>` results, keyed by flatpak_id, so
 # validation doesn't re-shell out on every launch/audit pass.
@@ -68,6 +68,27 @@ def _resolve_core_arg(arg, config, system_key):
     if arg != "{core}":
         return arg
     return config.get("retroarch_cores", {}).get(system_key, "")
+
+
+def managed_core_path(core, platform=None):
+    """Return the full path of a core RetroVault downloaded, else ``core`` unchanged.
+
+    RetroArch resolves a bare core name against its own cores directory, so a
+    name with no downloaded copy is passed through for it to find.
+    """
+    if not core or Path(core).name != core:
+        return core
+    suffix = ".dll" if (platform or sys.platform) == "win32" else ".so"
+    downloaded = CORES_DIR / f"{core}{suffix}"
+    return str(downloaded) if downloaded.is_file() else core
+
+
+def _resolve_core_args(args, config, system_key, platform=None):
+    resolved = [_resolve_core_arg(arg, config, system_key) for arg in args]
+    for i in range(1, len(resolved)):
+        if resolved[i - 1] in ("-L", "--libretro"):
+            resolved[i] = managed_core_path(resolved[i], platform=platform)
+    return resolved
 
 
 def get_emulator_config(system_key, config):
@@ -252,7 +273,7 @@ def build_launch_command(rom, config, platform=None, validate=True):
         core = config.get("retroarch_cores", {}).get(system_key, "")
         if not core:
             return None, "No RetroArch core configured for this system."
-        return [ra, "-L", core, rom_path], None
+        return [ra, "-L", managed_core_path(core, platform=platform), rom_path], None
 
     emu = get_emulator_config(system_key, config)
     launch_type = emu.get("launch_type", "exe")
@@ -262,7 +283,7 @@ def build_launch_command(rom, config, platform=None, validate=True):
         if not flatpak_id:
             return None, f"No emulator configured for {system_key.upper()}.\nGo to Settings -> Emulators to set one up."
         extra_args = _split_args_template(emu.get("args", "{rom}"), rom_path, platform=platform)
-        extra_args = [_resolve_core_arg(arg, config, system_key) for arg in extra_args]
+        extra_args = _resolve_core_args(extra_args, config, system_key, platform=platform)
         return ["flatpak", "run", flatpak_id] + extra_args, None
 
     emu_path = _strip_wrapping_quotes(emu.get("path", ""))
@@ -276,7 +297,7 @@ def build_launch_command(rom, config, platform=None, validate=True):
         emu_path = resolved
 
     extra_args = _split_args_template(emu.get("args", "{rom}"), rom_path, platform=platform)
-    extra_args = [_resolve_core_arg(arg, config, system_key) for arg in extra_args]
+    extra_args = _resolve_core_args(extra_args, config, system_key, platform=platform)
     return [emu_path] + extra_args, None
 
 

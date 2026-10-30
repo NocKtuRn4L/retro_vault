@@ -166,6 +166,10 @@ class ZipLaunchTests(unittest.TestCase):
         patcher = mock.patch.object(launch, "EXTRACTED_DIR", self.extracted_dir)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # Keep cores downloaded on this machine from turning core names into paths.
+        patcher = mock.patch.object(launch, "CORES_DIR", self.root / "cores")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         self.zip_path = make_zip(self.root / "roms" / "Metroid (USA).zip", {
             "Metroid (USA).nes": b"NES\x1a" + b"\1" * 100,

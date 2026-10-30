@@ -31,6 +31,8 @@ MEDIA_DIR = APP_DIR / "media"
 # ROMs unpacked from .zip files for emulators that can't open archives. Kept
 # between launches, since such emulators often write saves next to the ROM.
 EXTRACTED_DIR = APP_DIR / "extracted"
+# libretro cores RetroVault downloads itself; launches pass RetroArch their full path.
+CORES_DIR = APP_DIR / "cores"
 
 
 def init_app_dirs():

@@ -29,7 +29,7 @@ from ..core import audit as audit_mod
 from ..core import config as config_mod
 from ..input.actions import Action
 from ..platform import detect, recommend
-from ..providers import discovery, installer
+from ..providers import cores, discovery, installer
 from ..providers.manifest import load_registry
 from .controller_nav import activate_focused, make_focusable, move_focus
 
@@ -404,6 +404,8 @@ class SetupWizard(QDialog):
         if not available:
             return
 
+        core_errors = []
+
         def operation(progress):
             results = {}
             for manifest in available:
@@ -419,11 +421,15 @@ class SetupWizard(QDialog):
                     assume_yes=True,
                     progress=per_emitter,
                 )
+                if manifest.cores and not isinstance(results[manifest.id], installer.InstallInstruction):
+                    error = self._download_cores(manifest, progress)
+                    if error:
+                        core_errors.append(error)
             return results
 
         self._start_worker(
             operation,
-            self._install_complete,
+            lambda installed: self._install_complete(installed, core_errors),
             sids,
             lambda eid, done, total: self._update_progress(eid, done, total),
         )
@@ -445,7 +451,29 @@ class SetupWizard(QDialog):
                 else:
                     bar.setFormat("CONNECTING..." if done == 0 else "DOWNLOADING...")
 
-    def _install_complete(self, installed):
+    def _download_cores(self, manifest, progress):
+        """Fetch ``manifest``'s libretro cores; return an error message, or None on success.
+
+        Runs on the provisioning worker. A failure here doesn't undo the
+        emulator install, so it's reported rather than raised.
+        """
+        if self.platform_key not in cores.CORE_PLATFORMS:
+            return None
+        try:
+            cores.install_cores(
+                manifest.cores.values(),
+                self.platform_key,
+                progress=lambda _core, done, total: progress(manifest.id, done, total),
+            )
+        except installer.InstallError as error:
+            logging.warning("Downloading %s cores failed: %s", manifest.name, error)
+            return (
+                f"{manifest.name} is installed, but its cores could not be downloaded: {error}. "
+                "Try INSTALL again, or use RetroArch's Online Updater > Core Downloader."
+            )
+        return None
+
+    def _install_complete(self, installed, core_errors=()):
         detected = {}
         for emulator_id, result in installed.items():
             manifest = self.registry.get(emulator_id)
@@ -480,6 +508,9 @@ class SetupWizard(QDialog):
                 row["progress"].setVisible(True)
                 row["installed_path"] = installed[manifest.id]
                 row["install"].setText("UNINSTALL")
+        if core_errors:
+            self.instruction.setText(" ".join(core_errors))
+            self.instruction.setVisible(True)
         config_mod.save_config(self.config_data)
         self._run_audit()
 
